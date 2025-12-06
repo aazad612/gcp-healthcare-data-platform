@@ -41,8 +41,7 @@ jobs:
           
           # 1. IMPERSONATE: Use the Jenkins SA (ambient identity) to fetch 
           # the token for the TARGET_SA and set it as the default context.
-          gcloud auth configure-helper --project="${{ env.TARGET_PROJECT_ID }}" \
-             --target-service-account="${{ env.TARGET_SA_EMAIL }}"
+          gcloud config set auth/impersonate_service_account "${env.TARGET_SA_EMAIL}"
 
           # --- DEPLOYMENT STEP A: SCHEMA DEFINITION ---
           SCHEMA_FILE="bigquery/ops/tables/standards_definition.sql" 
