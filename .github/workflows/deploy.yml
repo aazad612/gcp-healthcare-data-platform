@@ -1,0 +1,54 @@
+# .github/workflows/deploy.yml
+
+name: GCP Keyless Deployment
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy_bq_migration:
+    runs-on: ubuntu-latest
+    
+    # CRITICAL: Grants the job permission to fetch the OIDC token
+    permissions:
+      id-token: write 
+      contents: read 
+
+    steps:
+      - uses: actions/checkout@v4
+      
+      # Step 1: Authenticate as the Central Jenkins SA
+      # This uses the secrets you just set up (GCP_SA_EMAIL & GCP_WIF_PROVIDER_ID)
+      - name: Authenticate to Google Cloud via WIF
+        uses: 'google-github-actions/auth@v2'
+        id: auth
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WIF_PROVIDER_ID }}
+          service_account: ${{ secrets.GCP_SA_EMAIL }}
+      
+      # Step 2: Deploy BigQuery Schema Migration
+      # This step must be repeated for every project (e.g., prod, dev, etc.)
+      - name: Deploy to Shared NP Project
+        env:
+          # Define the target credentials for this specific environment (Spoke Project)
+          TARGET_SA_EMAIL: project-service-account@prj-lbd-shared-np.iam.gserviceaccount.com
+          TARGET_PROJECT_ID: prj-lbd-shared-np
+          SQL_FILE_PATH: bq_migrations/v1_schema_update.sql # Ensure this path is correct
+          
+        run: |
+          echo "Starting BigQuery deployment to ${{ env.TARGET_PROJECT_ID }}"
+          
+          # The identity is currently the Jenkins Deployer SA.
+          # 1. Fetch token by impersonating the Spoke Project's Superuser SA (TARGET_SA_EMAIL)
+          TARGET_TOKEN=$(gcloud auth print-access-token --impersonate-service-account="${{ env.TARGET_SA_EMAIL }}")
+
+          # 2. Execute BQ command using the token of the target SA (which has BQ Editor rights)
+          bq --token="${TARGET_TOKEN}" \
+             query \
+             --use_legacy_sql=false \
+             --project_id="${{ env.TARGET_PROJECT_ID }}" \
+             < ${{ env.SQL_FILE_PATH }}
+          
+          echo "BigQuery deployment successful in ${{ env.TARGET_PROJECT_ID }}"
