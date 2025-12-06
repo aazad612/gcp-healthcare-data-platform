@@ -33,22 +33,35 @@ jobs:
       - name: Deploy to Shared NP Project
         env:
           # Define the target credentials for this specific environment (Spoke Project)
-          TARGET_SA_EMAIL: project-service-account@prj-lbd-shared-np.iam.gserviceaccount.com
-          TARGET_PROJECT_ID: prj-lbd-shared-np
-          SQL_FILE_PATH: bq_migrations/v1_schema_update.sql # Ensure this path is correct
-          
+          TARGET_SA_EMAIL: jenkins-deployer-id@prj-net-common-pd-host.iam.gserviceaccount.com
+          TARGET_PROJECT_ID: prj-net-common-pd-host
+
         run: |
-          echo "Starting BigQuery deployment to ${{ env.TARGET_PROJECT_ID }}"
+          echo "--- Starting Deployment to ${{ env.TARGET_PROJECT_ID }} ---"
           
-          # The identity is currently the Jenkins Deployer SA.
-          # 1. Fetch token by impersonating the Spoke Project's Superuser SA (TARGET_SA_EMAIL)
+          # 1. Fetch token by impersonating the Spoke Project's Superuser SA
           TARGET_TOKEN=$(gcloud auth print-access-token --impersonate-service-account="${{ env.TARGET_SA_EMAIL }}")
 
-          # 2. Execute BQ command using the token of the target SA (which has BQ Editor rights)
+          # --- DEPLOYMENT STEP A: SCHEMA DEFINITION ---
+          SCHEMA_FILE="bigquery/ops/tables/standards_definition.sql" 
+          echo "Running schema definition: ${SCHEMA_FILE}"
+
           bq --token="${TARGET_TOKEN}" \
              query \
              --use_legacy_sql=false \
              --project_id="${{ env.TARGET_PROJECT_ID }}" \
-             < ${{ env.SQL_FILE_PATH }}
+             < ${SCHEMA_FILE}
           
-          echo "BigQuery deployment successful in ${{ env.TARGET_PROJECT_ID }}"
+          echo "Schema definition complete."
+
+          # --- DEPLOYMENT STEP B: DATA INSERTION/SEEDS ---
+          DATA_FILE="bigquery/ops/seeds/bronze_v1_standards.sql"
+          echo "Running data insertion: ${DATA_FILE}"
+
+          bq --token="${TARGET_TOKEN}" \
+             query \
+             --use_legacy_sql=false \
+             --project_id="${{ env.TARGET_PROJECT_ID }}" \
+             < ${DATA_FILE}
+          
+          echo "Data insertion complete. Deployment finished."
