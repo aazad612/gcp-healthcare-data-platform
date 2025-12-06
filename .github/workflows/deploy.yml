@@ -47,8 +47,6 @@ jobs:
           echo "Running schema definition: ${SCHEMA_FILE}"
 
           bq --token="${TARGET_TOKEN}" \
-
-          # bq 
              query \
              --use_legacy_sql=false \
              --project_id="${{ env.TARGET_PROJECT_ID }}" \
@@ -61,7 +59,6 @@ jobs:
           echo "Running data insertion: ${DATA_FILE}"
 
           bq --token="${TARGET_TOKEN}" \
-          # bq 
              query \
              --use_legacy_sql=false \
              --project_id="${{ env.TARGET_PROJECT_ID }}" \
