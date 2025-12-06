@@ -51,6 +51,7 @@ jobs:
           # impersonated identity (the Target SA token). No '--token' needed.
           bq query \
              --use_legacy_sql=false \
+             --project_id="${{ env.TARGET_PROJECT_ID }}" \
              < ${SCHEMA_FILE}
           
           echo "Schema definition complete."
@@ -61,36 +62,8 @@ jobs:
 
           bq query \
              --use_legacy_sql=false \
+             --project_id="${{ env.TARGET_PROJECT_ID }}" \
              < ${DATA_FILE}
           
           echo "Data insertion complete. Deployment finished."
 
-        # run: |
-        #   echo "--- Starting Deployment to ${{ env.TARGET_PROJECT_ID }} ---"
-          
-        #   # 1. Fetch token by impersonating the Spoke Project's Superuser SA
-        #   TARGET_TOKEN=$(gcloud auth print-access-token --impersonate-service-account="${{ env.TARGET_SA_EMAIL }}")
-
-        #   # --- DEPLOYMENT STEP A: SCHEMA DEFINITION ---
-        #   SCHEMA_FILE="bigquery/ops/tables/standards_definition.sql" 
-        #   echo "Running schema definition: ${SCHEMA_FILE}"
-
-        #   bq --token="${TARGET_TOKEN}" \
-        #      query \
-        #      --use_legacy_sql=false \
-        #      --project_id="${{ env.TARGET_PROJECT_ID }}" \
-        #      < ${SCHEMA_FILE}
-          
-        #   echo "Schema definition complete."
-
-        #   # --- DEPLOYMENT STEP B: DATA INSERTION/SEEDS ---
-        #   DATA_FILE="bigquery/ops/seeds/bronze_v1_standards.sql"
-        #   echo "Running data insertion: ${DATA_FILE}"
-
-        #   bq --token="${TARGET_TOKEN}" \
-        #      query \
-        #      --use_legacy_sql=false \
-        #      --project_id="${{ env.TARGET_PROJECT_ID }}" \
-        #      < ${DATA_FILE}
-          
-        #   echo "Data insertion complete. Deployment finished."
