@@ -12,7 +12,7 @@ on:
       - main 
     paths:
       # Trigger only when the specific files change
-      - 'bigquery/clinical/synthea/bronze/patients.sql' 
+      - 'bigquery/clinical/synthea/bronze/tabls/patients.sql' 
       # - 'bigquery/scripts/validate_schema.py'
       # - '.github/workflows/synthia_deploy_ddl.yml'
 

@@ -10,31 +10,42 @@ on:
       - '.github/workflows/synthia_deploy_ddl_multi.yml'
       # - 'bigquery/scripts/validate_schema.py'
 
+    # paths-ignore:
+    #   - '**'
+
 jobs:
-  deploy-ddl:
+  deploy_ddl_multi:
     runs-on: ubuntu-latest
+
+    # 🔥 YOU CONTROL WHICH FILES ARE DEPLOYED HERE
+    env:
+      FILE_LIST: |
+        bigquery/clinical/synthea/bronze/tables/conditions.sql
+        bigquery/clinical/synthea/bronze/tables/encounters.sql
+        # bigquery/clinical/synthea/bronze/tables/patients.sql   # Uncomment if needed
 
     permissions:
       id-token: write
       contents: read
 
-    env:
-      # ⭐ EDIT THIS LIST WHEN YOU WANT MORE TABLES
-      SQL_FILES: |
-        bigquery/clinical/synthea/bronze/tables/conditions.sql
-        bigquery/clinical/synthea/bronze/tables/encounters.sql
-
     steps:
       - uses: actions/checkout@v4
 
-      # -------------------------------------------
-      # STEP 1 — Determine environment (dev/test/qa/prod)
-      # -------------------------------------------
-      - name: Determine Target Environment
-        id: envset
+      - name: Abort if no files selected
+        id: early_exit
         run: |
-          BR="${{ github.ref_name }}"
-          case "$BR" in
+          if [[ -z "${{ github.event.inputs.FILE_LIST }}" ]]; then
+            echo "::warning::No FILE_LIST provided. Skipping entire workflow."
+            exit 0
+          fi
+
+      # ---------------- ENVIRONMENT DETECTION ----------------
+      - name: Determine Target Environment Variables
+        id: set_vars
+        run: |
+          BRANCH_NAME="${{ github.ref_name }}"
+
+          case "$BRANCH_NAME" in
             dev)
               PROJECT_ID="prj-clin-syn-np"
               DATASET_ID="synthea_bronze_dev"
@@ -51,68 +62,70 @@ jobs:
               PROJECT_ID="prj-clin-syn-pd"
               DATASET_ID="synthea_bronze"
               ;;
+            *)
+              echo "::error::Unknown branch environment: $BRANCH_NAME"
+              exit 1
+              ;;
           esac
 
           echo "PROJECT_ID=$PROJECT_ID" >> $GITHUB_OUTPUT
           echo "DATASET_ID=$DATASET_ID" >> $GITHUB_OUTPUT
 
-      # -------------------------------------------
-      # STEP 2 — Authenticate via WIF
-      # -------------------------------------------
-      - name: Authenticate to Google Cloud (WIF)
+      # ---------------- AUTHENTICATION ----------------
+      - name: Authenticate via WIF
         uses: google-github-actions/auth@v2
         with:
-          service_account: ${{ secrets.GCP_SA_EMAIL }}
           workload_identity_provider: ${{ secrets.GCP_WIF_PROVIDER_ID }}
+          service_account: ${{ secrets.GCP_SA_EMAIL }}
 
-      # -------------------------------------------
-      # STEP 3 — Setup Python tools
-      # -------------------------------------------
-      - uses: actions/setup-python@v4
+      # ---------------- PYTHON SETUP ----------------
+      - name: Setup Python
+        uses: actions/setup-python@v4
         with:
-          python-version: "3.x"
+          python-version: '3.10'
 
-      - run: pip install sqlglot google-cloud-bigquery google-auth google-auth-impersonated-credentials
+      - name: Install Libraries
+        run: pip install sqlglot google-cloud-bigquery gcloud-auth
 
-      # -------------------------------------------
-      # STEP 4 — Impersonate SA for VALIDATION
-      # -------------------------------------------
-      - name: Impersonate Service Account (Validation)
+      # ---------------- PROCESS MULTIPLE FILES ----------------
+      - name: Validate + Deploy All Files in FILE_LIST
         env:
-          TARGET_SA_EMAIL: project-service-account@${{ steps.envset.outputs.PROJECT_ID }}.iam.gserviceaccount.com
+          PROJECT_ID: ${{ steps.set_vars.outputs.PROJECT_ID }}
+          DATASET_ID: ${{ steps.set_vars.outputs.DATASET_ID }}
         run: |
-          gcloud config set auth/impersonate_service_account "$TARGET_SA_EMAIL"
+          echo "🚀 Deploying the following SQL files:"
+          echo "${FILE_LIST}"
 
-      # -------------------------------------------
-      # STEP 5 — VALIDATE EACH SQL FILE
-      # -------------------------------------------
-      - name: Validate DDLs
-        run: |
-          for FILE in ${{ env.SQL_FILES }}; do
-            echo "Validating $FILE"
+          # Loop through each file in FILE_LIST
+          while IFS= read -r SQL_FILE; do
+            [[ -z "$SQL_FILE" ]] && continue
+
+            echo ""
+            echo "=============================="
+            echo " VALIDATING: $SQL_FILE"
+            echo "=============================="
+
             python bigquery/scripts/validate_schema.py \
-              --sql_file "$FILE" \
-              --project "${{ steps.envset.outputs.PROJECT_ID }}" \
-              --dataset "${{ steps.envset.outputs.DATASET_ID }}"
-          done
+              --sql_file "$SQL_FILE" \
+              --project "$PROJECT_ID" \
+              --dataset "$DATASET_ID"
 
-      # -------------------------------------------
-      # STEP 6 — Impersonate AGAIN for Deployment
-      # -------------------------------------------
-      - name: Impersonate Service Account (Deployment)
-        env:
-          TARGET_SA_EMAIL: project-service-account@${{ steps.envset.outputs.PROJECT_ID }}.iam.gserviceaccount.com
-        run: |
-          gcloud config set auth/impersonate_service_account "$TARGET_SA_EMAIL"
+            echo ""
+            echo "=============================="
+            echo " DEPLOYING: $SQL_FILE"
+            echo "=============================="
 
-      # -------------------------------------------
-      # STEP 7 — DEPLOY THE SQL FILES
-      # -------------------------------------------
-      - name: Deploy SQL Files
-        run: |
-          PROJECT="${{ steps.envset.outputs.PROJECT_ID }}"
-          for FILE in ${{ env.SQL_FILES }}; do
-            echo "Deploying $FILE ..."
-            bq --project_id="$PROJECT" query --use_legacy_sql=false < "$FILE"
-          done
-          echo "Deployment complete."
+            TARGET_SA="project-service-account@$PROJECT_ID.iam.gserviceaccount.com"
+
+            gcloud config set auth/impersonate_service_account "$TARGET_SA"
+
+            bq --project_id="$PROJECT_ID" \
+               --dataset_id="$DATASET_ID" \
+               query --use_legacy_sql=false \
+               < "$SQL_FILE"
+
+            echo "✅ Successfully deployed: $SQL_FILE"
+            echo ""
+          done <<< "$FILE_LIST"
+
+          echo "🎉 All deployments complete."
