@@ -5,6 +5,7 @@ from google.cloud import bigquery
 from google.cloud.exceptions import NotFound
 import sqlglot
 import re
+import os
 
 # ---------------------------------------------
 # CONFIGURATION
@@ -15,6 +16,7 @@ STANDARDS_TABLE = "standards_definition"
 
 TARGET_STANDARD_ID = "BRONZE_V1"
 TARGET_LAYER = "BRONZE"
+
 
 # ---------------------------------------------
 # TYPE NORMALIZATION
@@ -40,58 +42,49 @@ def normalize_type(t):
 
     return t
 
+
 # ---------------------------------------------
 # SQL PREPROCESSOR
 # ---------------------------------------------
 
 def preprocess_sql(ddl_text):
     ddl_text = re.sub(r"\{\{.*?\}\}", "TOKEN", ddl_text)
-    ddl_text = re.sub(r"\$\{.*?\}", "TOKEN", ddl_text)
+    ddl_text = re.sub(r"\$\{.*?\}\}", "TOKEN", ddl_text)
     ddl_text = re.sub(r"`([^`]*)`", lambda m: m.group(1).replace(".", "_"), ddl_text)
     return ddl_text
 
+
 # ---------------------------------------------
-# PARTITION + CLUSTER REGEX EXTRACTOR
+# PARTITION / CLUSTER REGEX EXTRACTION
 # ---------------------------------------------
 
-def extract_partition_and_cluster(ddl_text_raw):
-    """
-    Fully robust extraction of PARTITION BY and CLUSTER BY clauses.
-    Handles single-line, multi-line, semicolons, and trailing clauses.
-    """
-
+def extract_partition_and_cluster(ddl_raw):
     partition_cols = set()
     cluster_cols = set()
 
-    # ------------------------------------------
-    # PARTITION BY
-    # ------------------------------------------
+    # ---- PARTITION BY ----
     part_match = re.search(
         r"PARTITION\s+BY\s+(.+?)(?:\n|;)",
-        ddl_text_raw,
+        ddl_raw,
         flags=re.IGNORECASE
     )
+
     if part_match:
         expr = part_match.group(1)
         tokens = re.findall(r"[A-Za-z_][A-Za-z0-9_]*", expr)
         if tokens:
             partition_cols.add(tokens[-1].lower())
 
-    # ------------------------------------------
-    # CLUSTER BY  (SUPER ROBUST)
-    # ------------------------------------------
+    # ---- CLUSTER BY ---- (MULTI-LINE SAFE)
     cluster_match = re.search(
         r"CLUSTER\s+BY\s+(.+?)(?:OPTIONS|\nPARTITION|\nCLUSTER|;|$)",
-        ddl_text_raw,
+        ddl_raw,
         flags=re.IGNORECASE | re.DOTALL
     )
 
     if cluster_match:
         expr = cluster_match.group(1)
-
-        # extract identifiers
         cols = re.findall(r"[A-Za-z_][A-Za-z0-9_]*", expr)
-
         for c in cols:
             cluster_cols.add(c.lower())
 
@@ -138,8 +131,19 @@ def load_standards():
 
     return required_columns, required_partitions, required_clusters
 
+
 # ---------------------------------------------
-# PARSE SQL COLUMNS USING SQLGLOT
+# DERIVE TABLE NAME FROM FILE NAME
+# ---------------------------------------------
+
+def derive_table_name(sql_file_path):
+    base = os.path.basename(sql_file_path)
+    name = os.path.splitext(base)[0]
+    return name.lower()
+
+
+# ---------------------------------------------
+# PARSE SQL DDL FOR COLUMN DEFINITIONS
 # ---------------------------------------------
 
 def parse_sql_columns(sql_file):
@@ -161,6 +165,7 @@ def parse_sql_columns(sql_file):
 
     return ddl_columns, ddl_partitions, ddl_clusters
 
+
 # ---------------------------------------------
 # VALIDATE SQL DDL
 # ---------------------------------------------
@@ -169,40 +174,45 @@ def validate_sql_ddl(sql_file, required_columns, required_partitions, required_c
 
     ddl_columns, ddl_partitions, ddl_clusters = parse_sql_columns(sql_file)
 
+    # Missing columns
     missing_cols = [c for c in required_columns if c not in ddl_columns]
     if missing_cols:
         print(f"::error::DDL missing mandatory columns: {missing_cols}")
         sys.exit(1)
 
+    # Type mismatches
     mismatches = []
-    for col, exp_type in required_columns.items():
-        if ddl_columns[col] != exp_type:
-            mismatches.append(f"{col}: expected {exp_type}, found {ddl_columns[col]}")
+    for col, exp in required_columns.items():
+        if ddl_columns[col] != exp:
+            mismatches.append(f"{col}: expected {exp}, found {ddl_columns[col]}")
 
     if mismatches:
-        print("::error::DDL has datatype mismatches:\n" + "\n".join(mismatches))
+        print("::error::DDL datatype mismatches:\n" + "\n".join(mismatches))
         sys.exit(1)
 
+    # Partition check
     if required_partitions and not ddl_partitions:
         print(f"::error::DDL missing PARTITION BY. Required: {required_partitions}")
         sys.exit(1)
 
     if required_partitions and not (required_partitions & ddl_partitions):
-        print(f"::error::DDL missing required partition column. Found {ddl_partitions}, required {required_partitions}")
+        print(f"::error::DDL incorrect partition column. Found {ddl_partitions}, expected {required_partitions}")
         sys.exit(1)
 
+    # Cluster check
     if required_clusters and not ddl_clusters:
         print(f"::error::DDL missing CLUSTER BY. Required: {required_clusters}")
         sys.exit(1)
 
     if required_clusters and not required_clusters.issubset(ddl_clusters):
-        print(f"::error::DDL missing required cluster columns. Missing: {required_clusters - ddl_clusters}")
+        print(f"::error::DDL missing required cluster columns: {required_clusters - ddl_clusters}")
         sys.exit(1)
 
     print("INFO: SQL DDL validation passed.")
 
+
 # ---------------------------------------------
-# VALIDATE EXISTING BIGQUERY TABLE
+# VALIDATE EXISTING BQ TABLE
 # ---------------------------------------------
 
 def validate_existing_table(project, dataset, table, required_columns, required_partitions, required_clusters):
@@ -213,7 +223,7 @@ def validate_existing_table(project, dataset, table, required_columns, required_
     try:
         bq_table = client.get_table(ref)
     except NotFound:
-        print("INFO: Table does not exist yet — SQL DDL will enforce standards.")
+        print("INFO: Table does not exist yet — DDL will create it.")
         return
 
     existing_cols = {f.name.lower(): normalize_type(f.field_type) for f in bq_table.schema}
@@ -223,19 +233,19 @@ def validate_existing_table(project, dataset, table, required_columns, required_
         print(f"::error::Existing table missing mandatory columns: {missing}")
         sys.exit(1)
 
-    mismatches = [
-        f"{c}: expected {required_columns[c]}, found {existing_cols[c]}"
-        for c in required_columns
-        if existing_cols[c] != required_columns[c]
-    ]
+    mismatches = []
+    for col, exp in required_columns.items():
+        if existing_cols[col] != exp:
+            mismatches.append(f"{col}: expected {exp}, found {existing_cols[col]}")
 
     if mismatches:
-        print("::error::Existing table has datatype mismatches:\n" + "\n".join(mismatches))
+        print("::error::Existing table datatype mismatches:\n" + "\n".join(mismatches))
         sys.exit(1)
 
+    # Partition check
     if required_partitions:
         if not bq_table.time_partitioning:
-            print("::error::Existing table missing required partitioning.")
+            print("::error::Existing table missing partitioning.")
             sys.exit(1)
 
         col = bq_table.time_partitioning.field.lower()
@@ -243,38 +253,42 @@ def validate_existing_table(project, dataset, table, required_columns, required_
             print(f"::error::Incorrect partition column. Found {col}, required {required_partitions}")
             sys.exit(1)
 
+    # Cluster check
     if required_clusters:
         existing_clusters = set(c.lower() for c in (bq_table.clustering_fields or []))
-        if not required_clusters.issubset(existing_clusters):
-            print(f"::error::Existing table missing required cluster columns {required_clusters - existing_clusters}")
+        missing_clusters = required_clusters - existing_clusters
+
+        if missing_clusters:
+            print(f"::error::Existing table missing required cluster columns: {missing_clusters}")
             sys.exit(1)
 
-    print("INFO: Existing BQ table validation passed.")
+    print("INFO: Existing table validation passed.")
+
 
 # ---------------------------------------------
 # MAIN
 # ---------------------------------------------
 
-def main(sql_file, project, dataset, table):
+def main(sql_file, project, dataset):
 
-    required_columns, required_partitions, required_clusters = load_standards()
+    table = derive_table_name(sql_file)
 
-    validate_sql_ddl(sql_file, required_columns, required_partitions, required_clusters)
+    required_cols, required_parts, required_clust = load_standards()
+
+    validate_sql_ddl(sql_file, required_cols, required_parts, required_clust)
 
     validate_existing_table(project, dataset, table,
-                            required_columns, required_partitions, required_clusters)
+                            required_cols, required_parts, required_clust)
 
     print("INFO: All validation checks passed.")
     sys.exit(0)
 
-# ---------------------------------------------
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--sql_file", required=True)
     parser.add_argument("--project", required=True)
     parser.add_argument("--dataset", required=True)
-    parser.add_argument("--table", required=True)
-    args = parser.parse_args()
 
-    main(args.sql_file, args.project, args.dataset, args.table)
+    args = parser.parse_args()
+    main(args.sql_file, args.project, args.dataset)
