@@ -113,6 +113,7 @@ jobs:
 
           # 2. EXECUTE DDL using the impersonated identity
           bq --project_id="${{ env.TARGET_PROJECT_ID }}" \
+             --dataset_id="${{ env.TARGET_DATASET_ID }}" \
             query --use_legacy_sql=false \
             < "${{ env.SQL_FILE_PATH }}"
 

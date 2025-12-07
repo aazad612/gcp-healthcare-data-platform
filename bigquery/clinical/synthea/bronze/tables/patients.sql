@@ -1,4 +1,4 @@
-CREATE TABLE IF NOT EXISTS `{{PROJECT_ID}}.synthea_bronze_{{ENV}}.patients` (
+CREATE TABLE IF NOT EXISTS patients (
     -- 1. Business Data
     id STRING,
     birthdate DATE,
