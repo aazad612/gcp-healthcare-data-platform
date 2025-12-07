@@ -85,7 +85,7 @@ jobs:
           python-version: '3.10'
 
       - name: Install Libraries
-        run: pip install sqlglot google-cloud-bigquery gcloud-auth
+        run: pip install sqlglot google-cloud-bigquery google-auth
 
       # ---------------- PROCESS MULTIPLE FILES ----------------
       - name: Validate + Deploy All Files in FILE_LIST
