@@ -12,7 +12,7 @@ on:
       - main 
     paths:
       # Trigger only when the specific files change
-      - 'bigquery/ops/tables/patients.sql' 
+      - 'bigquery/clinical/synthea/bronze/**' 
       - 'bigquery/scripts/validate_schema.py'
       - '.github/workflows/deploy-synthea-clinical.yml'
 
@@ -80,7 +80,7 @@ jobs:
       - name: Run Schema Validation on patients.sql
         id: validate
         env:
-          SQL_FILE_PATH: bigquery/ops/tables/patients.sql
+          SQL_FILE_PATH: bigquery/clinical/synthea/bronze/tables/patients.sql
           
         run: |
           echo "Running DDL validation against: ${{ env.SQL_FILE_PATH }}"
