@@ -19,6 +19,9 @@ on:
 jobs:
   determine_and_deploy:
     runs-on: ubuntu-latest
+
+    env:
+      SQL_FILE_PATH: bigquery/clinical/synthea/bronze/tables/patients.sql
     
     permissions:
       id-token: write 
@@ -79,8 +82,8 @@ jobs:
       # --- STEP 4: Run Validation (Pre-Deployment Quality Gate) ---
       - name: Run Schema Validation on patients.sql
         id: validate
-        env:
-          SQL_FILE_PATH: bigquery/clinical/synthea/bronze/tables/patients.sql
+        # env:
+        #   SQL_FILE_PATH: bigquery/clinical/synthea/bronze/tables/patients.sql
           
         run: |
           echo "Running DDL validation against: ${{ env.SQL_FILE_PATH }}"
@@ -100,7 +103,7 @@ jobs:
           TARGET_DATASET_ID: ${{ steps.set_vars.outputs.DATASET_ID }}
           # Dynamically builds the SA email for impersonation
           TARGET_SA_EMAIL: project-service-account@${{ steps.set_vars.outputs.PROJECT_ID }}.iam.gserviceaccount.com 
-          SQL_FILE_PATH: bigquery/ops/tables/patients.sql 
+          # SQL_FILE_PATH: bigquery/clinical/synthea/bronze/tables/patients.sql 
           
         run: |
           echo "--- Starting Deployment to ${{ env.TARGET_PROJECT_ID }}/${{ env.TARGET_DATASET_ID }} ---"
