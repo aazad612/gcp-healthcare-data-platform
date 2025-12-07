@@ -1,0 +1,116 @@
+# .github/workflows/deploy-synthea-clinical.yml
+
+name: 🏥 Synthea Clinical Data Deployment
+
+on:
+  push:
+    branches:
+      # Trigger on pushes to all necessary environment branches
+      - dev
+      - test
+      - qa
+      - main 
+    paths:
+      # Trigger only when the specific files change
+      - 'bigquery/ops/tables/patients.sql' 
+      - 'bigquery/scripts/validate_schema.py'
+      - '.github/workflows/deploy-synthea-clinical.yml'
+
+jobs:
+  determine_and_deploy:
+    runs-on: ubuntu-latest
+    
+    permissions:
+      id-token: write 
+      contents: read 
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # --- STEP 1: Determine Target Environment and Set Variables ---
+      - name: Determine Target Environment Variables
+        id: set_vars
+        run: |
+          BRANCH_NAME="${{ github.ref_name }}"
+          
+          # Map branch to specific Project ID and Dataset ID
+          case "$BRANCH_NAME" in
+            dev)
+              PROJECT_ID="prj-clin-syn-np"
+              DATASET_ID="synthea_bronze_dev"
+              ;;
+            test)
+              PROJECT_ID="prj-clin-syn-np-test" # Placeholder, adjust as needed
+              DATASET_ID="synthea_bronze_test"
+              ;;
+            qa)
+              PROJECT_ID="prj-clin-syn-np-qa" # Placeholder, adjust as needed
+              DATASET_ID="synthea_bronze_qa"
+              ;;
+            main)
+              PROJECT_ID="prj-clin-syn-pd"
+              DATASET_ID="synthea_bronze"
+              ;;
+            *)
+              echo "::error::Branch $BRANCH_NAME is not mapped to an environment."
+              exit 1
+              ;;
+          esac
+          
+          echo "PROJECT_ID=$PROJECT_ID" >> $GITHUB_OUTPUT
+          echo "DATASET_ID=$DATASET_ID" >> $GITHUB_OUTPUT
+          
+      # --- STEP 2: Authenticate (WIF Login as Jenkins SA) ---
+      - name: Authenticate to Google Cloud via WIF
+        uses: 'google-github-actions/auth@v2'
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WIF_PROVIDER_ID }}
+          service_account: ${{ secrets.GCP_SA_EMAIL }}
+
+      # --- STEP 3: Validation Setup ---
+      - name: Setup Python and Install Tools
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.x'
+
+      - name: Install SQL Parsing Libraries
+        run: pip install sqlglot 
+
+      # --- STEP 4: Run Validation (Pre-Deployment Quality Gate) ---
+      - name: Run Schema Validation on patients.sql
+        id: validate
+        env:
+          SQL_FILE_PATH: bigquery/ops/tables/patients.sql
+          
+        run: |
+          echo "Running DDL validation against: ${{ env.SQL_FILE_PATH }}"
+          
+          # Executes the Python script. Fails workflow on missing audit columns.
+          python bigquery/scripts/validate_schema.py \
+            --sql-file ${{ env.SQL_FILE_PATH }}
+            
+          # The script logs ::warning:: if partitioning/clustering is missing.
+
+      # --- STEP 5: Final Deployment ---
+      - name: Deploy Patients Table to Dynamic Environment
+        env:
+          TARGET_PROJECT_ID: ${{ steps.set_vars.outputs.PROJECT_ID }}
+          TARGET_DATASET_ID: ${{ steps.set_vars.outputs.DATASET_ID }}
+          # Dynamically builds the SA email for impersonation
+          TARGET_SA_EMAIL: project-service-account@${{ steps.set_vars.outputs.PROJECT_ID }}.iam.gserviceaccount.com 
+          SQL_FILE_PATH: bigquery/ops/tables/patients.sql 
+          
+        run: |
+          echo "--- Starting Deployment to ${{ env.TARGET_PROJECT_ID }}/${{ env.TARGET_DATASET_ID }} ---"
+          
+          # 1. IMPERSONATE: Set the ambient context to the TARGET_SA (Executor)
+          gcloud config set auth/impersonate_service_account "${{ env.TARGET_SA_EMAIL }}"
+
+          # 2. EXECUTE DDL using the impersonated identity
+          bq query \
+             --use_legacy_sql=false \
+             --project_id="${{ env.TARGET_PROJECT_ID }}" \
+             --default_dataset="${{ env.TARGET_DATASET_ID }}" \
+             < ${{ env.SQL_FILE_PATH }}
+          
+          echo "Deployment successful."
