@@ -96,13 +96,13 @@ jobs:
           echo "🚀 Deploying the following SQL files:"
           echo "${FILE_LIST}"
 
-          SQL_FILE="$(echo "$SQL_FILE" \
+          # Loop through each file in FILE_LIST
+          while IFS=',' read -r RAW_FILE; do
+            [[ -z "$RAW_FILE" ]] && continue
+
+            SQL_FILE="$(echo "$SQL_FILE" \
               | sed 's/^[[:space:]]*//; s/[[:space:]]*$//' \
               | sed 's/^"//; s/"$//')"
-              
-          # Loop through each file in FILE_LIST
-          while IFS=',' read -r SQL_FILE; do
-            [[ -z "$SQL_FILE" ]] && continue
 
             echo ""
             echo "=============================="
