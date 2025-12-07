@@ -31,11 +31,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Abort if no files selected
-        id: early_exit
+      - name: Abort if no FILE_LIST
         run: |
-          if [[ -z "${{ github.event.inputs.FILE_LIST }}" ]]; then
-            echo "::warning::No FILE_LIST provided. Skipping entire workflow."
+          if [[ -z "${FILE_LIST// }" ]]; then
+            echo "::warning::FILE_LIST is empty. Nothing to deploy."
             exit 0
           fi
 
