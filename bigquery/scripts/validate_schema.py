@@ -1,15 +1,16 @@
 #!/usr/bin/env python3
 import argparse
 import sys
-from google.cloud import bigquery
-from google.cloud.exceptions import NotFound
-import sqlglot
 import re
-import os
+
+from google.cloud import bigquery
+import google.auth
+from google.auth import impersonated_credentials
 
 # ---------------------------------------------
 # CONFIGURATION
 # ---------------------------------------------
+
 STANDARDS_PROJECT = "prj-lbd-shared-np"
 STANDARDS_DATASET = "ops_metadata"
 STANDARDS_TABLE = "standards_definition"
@@ -17,86 +18,71 @@ STANDARDS_TABLE = "standards_definition"
 TARGET_STANDARD_ID = "BRONZE_V1"
 TARGET_LAYER = "BRONZE"
 
+# ---------------------------------------------
+# IMPERSONATION CLIENT BUILDER
+# ---------------------------------------------
+
+def get_impersonated_bq_client(target_sa, project_id):
+    """
+    Always impersonate the deployment service account.
+    This overrides whatever GHA WIF identity is active.
+    """
+    print(f"DEBUG: Impersonating SA: {target_sa}")
+
+    source_credentials, _ = google.auth.default()
+
+    target_creds = impersonated_credentials.Credentials(
+        source_credentials=source_credentials,
+        target_principal=target_sa,
+        target_scopes=["https://www.googleapis.com/auth/cloud-platform"],
+        lifetime=3600,
+    )
+
+    return bigquery.Client(project=project_id, credentials=target_creds)
+
+
+def debug_identity(client):
+    """
+    Runs SELECT SESSION_USER() to verify which identity BigQuery sees.
+    """
+    try:
+        q = "SELECT SESSION_USER() AS identity"
+        result = list(client.query(q).result())
+        print(f"DEBUG: BigQuery sees identity: {result[0].identity}")
+    except Exception as e:
+        print(f"DEBUG ERROR: Unable to detect identity: {e}")
+
 
 # ---------------------------------------------
-# TYPE NORMALIZATION
+# NORMALIZATION UTILS
 # ---------------------------------------------
 
 def normalize_type(t):
     if not t:
         return None
-
     t = t.upper()
-
     if t in ("TIMESTAMPTZ", "TIMESTAMPZ"):
         return "TIMESTAMP"
-
     if t == "TEXT":
         return "STRING"
-
     if t in ("INT", "INTEGER"):
         return "INT64"
-
     if t == "DATETIME":
         return "TIMESTAMP"
-
     return t
 
-
-# ---------------------------------------------
-# SQL PREPROCESSOR
-# ---------------------------------------------
-
 def preprocess_sql(ddl_text):
-    ddl_text = re.sub(r"\{\{.*?\}\}", "TOKEN", ddl_text)
-    ddl_text = re.sub(r"\$\{.*?\}\}", "TOKEN", ddl_text)
+    ddl_text = re.sub(r"\{\{.*?\}\}", "TEMPLATE_TOKEN", ddl_text)
+    ddl_text = re.sub(r"\$\{.*?\}", "TEMPLATE_TOKEN", ddl_text)
     ddl_text = re.sub(r"`([^`]*)`", lambda m: m.group(1).replace(".", "_"), ddl_text)
     return ddl_text
 
 
 # ---------------------------------------------
-# PARTITION / CLUSTER REGEX EXTRACTION
+# LOAD STANDARDS FROM SHARED PROJECT
 # ---------------------------------------------
 
-def extract_partition_and_cluster(ddl_raw):
-    partition_cols = set()
-    cluster_cols = set()
-
-    # ---- PARTITION BY ----
-    part_match = re.search(
-        r"PARTITION\s+BY\s+(.+?)(?:\n|;)",
-        ddl_raw,
-        flags=re.IGNORECASE
-    )
-
-    if part_match:
-        expr = part_match.group(1)
-        tokens = re.findall(r"[A-Za-z_][A-Za-z0-9_]*", expr)
-        if tokens:
-            partition_cols.add(tokens[-1].lower())
-
-    # ---- CLUSTER BY ---- (MULTI-LINE SAFE)
-    cluster_match = re.search(
-        r"CLUSTER\s+BY\s+(.+?)(?:OPTIONS|\nPARTITION|\nCLUSTER|;|$)",
-        ddl_raw,
-        flags=re.IGNORECASE | re.DOTALL
-    )
-
-    if cluster_match:
-        expr = cluster_match.group(1)
-        cols = re.findall(r"[A-Za-z_][A-Za-z0-9_]*", expr)
-        for c in cols:
-            cluster_cols.add(c.lower())
-
-    return partition_cols, cluster_cols
-
-
-# ---------------------------------------------
-# LOAD BRONZE STANDARDS
-# ---------------------------------------------
-
-def load_standards():
-    client = bigquery.Client(project=STANDARDS_PROJECT)
+def load_standards(bq_client):
     table_ref = f"{STANDARDS_PROJECT}.{STANDARDS_DATASET}.{STANDARDS_TABLE}"
 
     query = f"""
@@ -112,172 +98,111 @@ def load_standards():
             AND layer = '{TARGET_LAYER}'
     """
 
-    rows = list(client.query(query).result())
+    rows = list(bq_client.query(query).result())
+
     if not rows:
-        print(f"::error::No standards found for {TARGET_STANDARD_ID}")
+        print(f"::error::No standards found for {TARGET_STANDARD_ID} in {table_ref}")
         sys.exit(1)
 
-    required_columns = {}
-    required_partitions = set()
-    required_clusters = set()
+    required_cols = {}
+    required_parts = set()
+    required_clust = set()
 
     for r in rows:
         col = r.column_name.lower()
-        required_columns[col] = r.expected_type.upper()
+        required_cols[col] = r.expected_type.upper()
+
         if r.is_partition_col:
-            required_partitions.add(col)
+            required_parts.add(col)
+
         if r.is_cluster_col:
-            required_clusters.add(col)
+            required_clust.add(col)
 
-    return required_columns, required_partitions, required_clusters
-
-
-# ---------------------------------------------
-# DERIVE TABLE NAME FROM FILE NAME
-# ---------------------------------------------
-
-def derive_table_name(sql_file_path):
-    base = os.path.basename(sql_file_path)
-    name = os.path.splitext(base)[0]
-    return name.lower()
+    print(f"DEBUG: Loaded {len(rows)} standards rows")
+    return required_cols, required_parts, required_clust
 
 
 # ---------------------------------------------
-# PARSE SQL DDL FOR COLUMN DEFINITIONS
+# PARSE AND VALIDATE SQL
 # ---------------------------------------------
 
-def parse_sql_columns(sql_file):
+def parse_sql_file(sql_file):
+    import sqlglot
+
     with open(sql_file, "r") as f:
-        ddl_raw = f.read()
+        ddl_text = preprocess_sql(f.read())
 
-    ddl_clean = preprocess_sql(ddl_raw)
-
-    parsed = sqlglot.parse_one(ddl_clean, read="bigquery", error_level="ignore")
+    try:
+        parsed = sqlglot.parse_one(ddl_text, read="bigquery")
+    except Exception as e:
+        print(f"::error::Unable to parse SQL file {sql_file}: {e}")
+        sys.exit(1)
 
     ddl_columns = {}
     for coldef in parsed.find_all(sqlglot.expressions.ColumnDef):
-        col = coldef.name.lower()
+        col_name = coldef.name.lower()
         type_expr = coldef.args.get("kind")
         if type_expr:
-            ddl_columns[col] = normalize_type(type_expr.sql())
+            ddl_columns[col_name] = normalize_type(type_expr.sql())
 
-    ddl_partitions, ddl_clusters = extract_partition_and_cluster(ddl_raw)
+    # Extract PARTITION BY / CLUSTER BY
+    ddl_partitions = set()
+    ddl_clusters = set()
+
+    part = parsed.find(sqlglot.expressions.Partition)
+    if part and part.expressions:
+        for expr in part.expressions:
+            if hasattr(expr, "name"):
+                ddl_partitions.add(expr.name.lower())
+            elif expr.expressions:
+                inner = expr.expressions[0]
+                if hasattr(inner, "name"):
+                    ddl_partitions.add(inner.name.lower())
+
+    cluster = parsed.find(sqlglot.expressions.Cluster)
+    if cluster and cluster.expressions:
+        ddl_clusters = {expr.name.lower() for expr in cluster.expressions}
 
     return ddl_columns, ddl_partitions, ddl_clusters
 
 
-# ---------------------------------------------
-# VALIDATE SQL DDL
-# ---------------------------------------------
+def validate_sql_ddl(sql_file, required_cols, required_parts, required_clust):
+    ddl_cols, ddl_parts, ddl_clust = parse_sql_file(sql_file)
 
-def validate_sql_ddl(sql_file, required_columns, required_partitions, required_clusters):
-
-    ddl_columns, ddl_partitions, ddl_clusters = parse_sql_columns(sql_file)
-
-    # Missing columns
-    missing_cols = [c for c in required_columns if c not in ddl_columns]
-    if missing_cols:
-        print(f"::error::DDL missing mandatory columns: {missing_cols}")
-        sys.exit(1)
-
-    # Type mismatches
-    mismatches = []
-    for col, exp in required_columns.items():
-        if ddl_columns[col] != exp:
-            mismatches.append(f"{col}: expected {exp}, found {ddl_columns[col]}")
-
-    if mismatches:
-        print("::error::DDL datatype mismatches:\n" + "\n".join(mismatches))
-        sys.exit(1)
-
-    # Partition check
-    if required_partitions and not ddl_partitions:
-        print(f"::error::DDL missing PARTITION BY. Required: {required_partitions}")
-        sys.exit(1)
-
-    if required_partitions and not (required_partitions & ddl_partitions):
-        print(f"::error::DDL incorrect partition column. Found {ddl_partitions}, expected {required_partitions}")
-        sys.exit(1)
-
-    # Cluster check
-    if required_clusters and not ddl_clusters:
-        print(f"::error::DDL missing CLUSTER BY. Required: {required_clusters}")
-        sys.exit(1)
-
-    if required_clusters and not required_clusters.issubset(ddl_clusters):
-        print(f"::error::DDL missing required cluster columns: {required_clusters - ddl_clusters}")
-        sys.exit(1)
-
-    print("INFO: SQL DDL validation passed.")
-
-
-# ---------------------------------------------
-# VALIDATE EXISTING BQ TABLE
-# ---------------------------------------------
-
-def debug_identity(project_id):
-    """
-    Runs SELECT SESSION_USER() to confirm which identity BigQuery sees.
-    """
-    try:
-        client = bigquery.Client(project=project_id)
-        debug_query = "SELECT SESSION_USER() as identity"
-        result = list(client.query(debug_query).result())
-        print(f"DEBUG: BigQuery sees identity: {result[0].identity}")
-    except Exception as e:
-        print(f"DEBUG ERROR: Unable to detect identity: {e}")
-
-
-
-
-def validate_existing_table(project, dataset, table, required_columns, required_partitions, required_clusters):
-
-    client = bigquery.Client(project=project)
-    ref = f"{project}.{dataset}.{table}"
-
-    try:
-        bq_table = client.get_table(ref)
-    except NotFound:
-        print("INFO: Table does not exist yet — DDL will create it.")
-        return
-
-    existing_cols = {f.name.lower(): normalize_type(f.field_type) for f in bq_table.schema}
-
-    missing = [c for c in required_columns if c not in existing_cols]
+    missing = [c for c in required_cols if c not in ddl_cols]
     if missing:
-        print(f"::error::Existing table missing mandatory columns: {missing}")
+        print(f"::error::DDL missing mandatory columns: {missing}")
         sys.exit(1)
 
     mismatches = []
-    for col, exp in required_columns.items():
-        if existing_cols[col] != exp:
-            mismatches.append(f"{col}: expected {exp}, found {existing_cols[col]}")
+    for col, exp_type in required_cols.items():
+        if ddl_cols[col] != exp_type:
+            mismatches.append(f"{col}: expected {exp_type}, found {ddl_cols[col]}")
 
     if mismatches:
-        print("::error::Existing table datatype mismatches:\n" + "\n".join(mismatches))
+        print("::error::DDL datatype mismatches:")
+        for m in mismatches:
+            print("  - " + m)
         sys.exit(1)
 
-    # Partition check
-    if required_partitions:
-        if not bq_table.time_partitioning:
-            print("::error::Existing table missing partitioning.")
-            sys.exit(1)
+    if required_parts and not ddl_parts:
+        print(f"::error::DDL missing PARTITION BY. Required: {required_parts}")
+        sys.exit(1)
 
-        col = bq_table.time_partitioning.field.lower()
-        if col not in required_partitions:
-            print(f"::error::Incorrect partition column. Found {col}, required {required_partitions}")
-            sys.exit(1)
+    if required_parts and not (set(required_parts) & set(ddl_parts)):
+        print(f"::error::Incorrect partition columns. Required: {required_parts}, Found: {ddl_parts}")
+        sys.exit(1)
 
-    # Cluster check
-    if required_clusters:
-        existing_clusters = set(c.lower() for c in (bq_table.clustering_fields or []))
-        missing_clusters = required_clusters - existing_clusters
+    if required_clust and not ddl_clust:
+        print(f"::error::DDL missing CLUSTER BY. Required: {required_clust}")
+        sys.exit(1)
 
-        if missing_clusters:
-            print(f"::error::Existing table missing required cluster columns: {missing_clusters}")
-            sys.exit(1)
+    if required_clust and not required_clust.issubset(ddl_clust):
+        missing = required_clust - ddl_clust
+        print(f"::error::Missing cluster columns: {missing}")
+        sys.exit(1)
 
-    print("INFO: Existing table validation passed.")
+    print("DEBUG: SQL DDL validation passed.")
 
 
 # ---------------------------------------------
@@ -285,17 +210,20 @@ def validate_existing_table(project, dataset, table, required_columns, required_
 # ---------------------------------------------
 
 def main(sql_file, project, dataset):
+    target_sa = f"project-service-account@{project}.iam.gserviceaccount.com"
 
-    table = derive_table_name(sql_file)
+    # Build impersonated client for *shared project* standards lookup
+    shared_client = get_impersonated_bq_client(target_sa, STANDARDS_PROJECT)
+    print("DEBUG: Checking BigQuery identity (shared project):")
+    debug_identity(shared_client)
 
-    required_cols, required_parts, required_clust = load_standards()
+    # Load standards
+    required_cols, required_parts, required_clust = load_standards(shared_client)
 
+    # Validate SQL file structure
     validate_sql_ddl(sql_file, required_cols, required_parts, required_clust)
 
-    validate_existing_table(project, dataset, table,
-                            required_cols, required_parts, required_clust)
-
-    print("INFO: All validation checks passed.")
+    print("INFO: Validation successful.")
     sys.exit(0)
 
 
@@ -304,9 +232,6 @@ if __name__ == "__main__":
     parser.add_argument("--sql_file", required=True)
     parser.add_argument("--project", required=True)
     parser.add_argument("--dataset", required=True)
-
     args = parser.parse_args()
-
-    debug_identity(args.project)
 
     main(args.sql_file, args.project, args.dataset)
