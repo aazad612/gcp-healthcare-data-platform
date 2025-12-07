@@ -6,6 +6,9 @@ from google.cloud import bigquery
 from google.auth import impersonated_credentials
 from google.auth.transport.requests import Request
 import sqlglot
+import google.auth
+
+
 
 # ---------------------------------------------
 # CONFIGURATION
