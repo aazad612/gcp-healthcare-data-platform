@@ -96,13 +96,20 @@ jobs:
           echo "🚀 Deploying the following SQL files:"
           echo "${FILE_LIST}"
 
-          # Loop through each file in FILE_LIST
-          while IFS=',' read -r RAW_FILE; do
-            [[ -z "$RAW_FILE" ]] && continue
+          # Normalize the list:
+          # - Replace commas with spaces
+          # - Trim quotes
+          # - Remove empty entries
+          NORMALIZED_LIST=$(echo "$FILE_LIST" \
+              | tr ',' ' ' \
+              | sed 's/"//g' \
+              | xargs)
 
-            SQL_FILE="$(echo "$SQL_FILE" \
-              | sed 's/^[[:space:]]*//; s/[[:space:]]*$//' \
-              | sed 's/^"//; s/"$//')"
+          # Now loop safely
+          for SQL_FILE in $NORMALIZED_LIST; do
+            if [[ -z "$SQL_FILE" ]]; then
+              continue
+            fi
 
             echo ""
             echo "=============================="
@@ -110,9 +117,9 @@ jobs:
             echo "=============================="
 
             python bigquery/scripts/validate_schema.py \
-              --sql_file "$SQL_FILE" \
-              --project "$PROJECT_ID" \
-              --dataset "$DATASET_ID"
+                --sql_file "$SQL_FILE" \
+                --project "$PROJECT_ID" \
+                --dataset "$DATASET_ID"
 
             echo ""
             echo "=============================="
@@ -120,16 +127,15 @@ jobs:
             echo "=============================="
 
             TARGET_SA="project-service-account@$PROJECT_ID.iam.gserviceaccount.com"
-
             gcloud config set auth/impersonate_service_account "$TARGET_SA"
 
             bq --project_id="$PROJECT_ID" \
-               --dataset_id="$DATASET_ID" \
-               query --use_legacy_sql=false \
-               < "$SQL_FILE"
+              --dataset_id="$DATASET_ID" \
+              query --use_legacy_sql=false \
+              < "$SQL_FILE"
 
             echo "✅ Successfully deployed: $SQL_FILE"
             echo ""
-          done <<< "$FILE_LIST"
+          done
 
           echo "🎉 All deployments complete."
