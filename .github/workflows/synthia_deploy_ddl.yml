@@ -109,10 +109,8 @@ jobs:
           gcloud config set auth/impersonate_service_account "${{ env.TARGET_SA_EMAIL }}"
 
           # 2. EXECUTE DDL using the impersonated identity
-          bq query \
-             --use_legacy_sql=false \
-             --project_id="${{ env.TARGET_PROJECT_ID }}" \
-             --default_dataset="${{ env.TARGET_DATASET_ID }}" \
-             --sql_file="${{ env.SQL_FILE_PATH }}"
-          
+          bq --project_id="${{ env.TARGET_PROJECT_ID }}" \
+            query --use_legacy_sql=false \
+            < "${{ env.SQL_FILE_PATH }}"
+
           echo "Deployment successful."
