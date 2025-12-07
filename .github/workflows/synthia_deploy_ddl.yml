@@ -74,7 +74,7 @@ jobs:
           python-version: '3.x'
 
       - name: Install SQL Parsing Libraries
-        run: pip install sqlglot 
+        run: pip install sqlglot google-cloud-bigquery
 
       # --- STEP 4: Run Validation (Pre-Deployment Quality Gate) ---
       - name: Run Schema Validation on patients.sql
