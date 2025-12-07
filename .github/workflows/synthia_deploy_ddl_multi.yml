@@ -19,10 +19,10 @@ jobs:
 
     # 🔥 YOU CONTROL WHICH FILES ARE DEPLOYED HERE
     env:
-      FILE_LIST: |
-        bigquery/clinical/synthea/bronze/tables/conditions.sql
+      FILE_LIST: >
+        bigquery/clinical/synthea/bronze/tables/conditions.sql.
         bigquery/clinical/synthea/bronze/tables/encounters.sql
-        # bigquery/clinical/synthea/bronze/tables/patients.sql   # Uncomment if needed
+
 
     permissions:
       id-token: write
