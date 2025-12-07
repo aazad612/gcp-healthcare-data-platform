@@ -87,7 +87,9 @@ jobs:
           
           # Executes the Python script. Fails workflow on missing audit columns.
           python bigquery/scripts/validate_schema.py \
-            --sql-file ${{ env.SQL_FILE_PATH }}
+            --sql_file "${{ env.SQL_FILE_PATH }}" \
+            --project "${{ steps.set_vars.outputs.PROJECT_ID }}" \
+            --dataset "${{ steps.set_vars.outputs.DATASET_ID }}"
             
           # The script logs ::warning:: if partitioning/clustering is missing.
 
@@ -110,7 +112,7 @@ jobs:
           bq query \
              --use_legacy_sql=false \
              --project_id="${{ env.TARGET_PROJECT_ID }}" \
-             --dataset="${{ env.TARGET_DATASET_ID }}" \
+             --default_dataset="${{ env.TARGET_DATASET_ID }}" \
              --sql_file="${{ env.SQL_FILE_PATH }}""
           
           echo "Deployment successful."
