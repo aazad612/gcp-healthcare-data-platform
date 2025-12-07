@@ -1,0 +1,80 @@
+# ============================
+# 🌍 Line endings normalization
+# ============================
+# Auto-detect text files and normalize line endings to LF in repo, convert on checkout for OS
+* text=auto eol=lf
+
+# ============================
+# 🐍 Python files
+# ============================
+*.py text diff=python
+*.ipynb text linguist-language=Jupyter Notebook
+*.pyw text diff=python
+
+# ============================
+# 🌍 Terraform files
+# ============================
+*.tf text diff=terraform
+*.tfvars text diff=terraform
+*.hcl text diff=terraform
+
+# ============================
+# 🧱 JSON, YAML, and Configs
+# ============================
+*.json text diff=json
+*.yaml text diff=yaml
+*.yml text diff=yaml
+*.toml text diff=toml
+*.ini text
+*.cfg text
+
+# ============================
+# 🗜️ Binary / compiled files
+# ============================
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.pdf binary
+*.zip binary
+*.tar binary
+*.gz binary
+*.7z binary
+*.exe binary
+*.dll binary
+*.so binary
+*.pkl binary
+*.db binary
+*.sqlite3 binary
+
+# ============================
+# 🧠 Documentation & Markdown
+# ============================
+*.md text diff=markdown
+*.rst text diff=markdown
+
+# ============================
+# 🧰 Scripts and templates
+# ============================
+*.sh text eol=lf
+*.bash text eol=lf
+*.zsh text eol=lf
+*.ps1 text eol=crlf
+*.bat text eol=crlf
+
+# ============================
+# 📁 OS-specific normalization
+# ============================
+*.cmd text eol=crlf
+*.txt text eol=lf
+.DS_Store binary
+Thumbs.db binary
+
+# ============================
+# 🚫 GitHub linguist overrides (optional)
+# ============================
+# Exclude generated files from language stats
+docs/** linguist-documentation
+terraform/** linguist-language=HCL
+

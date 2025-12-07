@@ -26,19 +26,19 @@ CREATE TABLE IF NOT EXISTS `{{PROJECT_ID}}.synthea_bronze_{{ENV}}.patients` (
     meta_batch_id STRING,
 
     -- 3. Source Context
-    -- meta_source_system STRING,
-    -- meta_source_filename STRING,
-    -- meta_source_filedate DATE,
+    meta_source_system STRING,
+    meta_source_filename STRING,
+    meta_source_filedate DATE,
 
-    -- -- 4. Ingestion Audit
-    -- meta_ingest_timestamp TIMESTAMP,
-    -- meta_dq_flag STRING,
+    -- 4. Ingestion Audit
+    meta_ingest_timestamp TIMESTAMP,
+    meta_dq_flag STRING,
 
-    -- -- 5. Record Audit
-    -- meta_created_by STRING,
-    -- meta_created_date TIMESTAMP,
-    -- meta_updated_by STRING,
-    -- meta_updated_date TIMESTAMP
+    -- 5. Record Audit
+    meta_created_by STRING,
+    meta_created_date TIMESTAMP,
+    meta_updated_by STRING,
+    meta_updated_date TIMESTAMP
 )
 PARTITION BY DATE(meta_ingest_timestamp)
-CLUSTER BY id, meta_source_filedate;
+CLUSTER BY meta_row_uuid;
