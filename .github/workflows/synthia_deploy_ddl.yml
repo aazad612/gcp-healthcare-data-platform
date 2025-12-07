@@ -12,9 +12,9 @@ on:
       - main 
     paths:
       # Trigger only when the specific files change
-      - 'bigquery/clinical/synthea/bronze/**' 
-      - 'bigquery/scripts/validate_schema.py'
-      - '.github/workflows/synthia_deploy_ddl.yml'
+      - 'bigquery/clinical/synthea/bronze/patients.sql' 
+      # - 'bigquery/scripts/validate_schema.py'
+      # - '.github/workflows/synthia_deploy_ddl.yml'
 
 jobs:
   determine_and_deploy:

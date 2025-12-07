@@ -1,197 +1,118 @@
-#!/usr/bin/env python3
-import argparse
-import re
-import sys
-from google.cloud import bigquery
-from google.cloud.exceptions import NotFound
-import sqlglot
-from google.auth import default
-from google.auth.impersonated_credentials import ImpersonatedCredentials
+name: 🏥 Synthea Multi-DDL Deployment
 
+on:
+  push:
+    branches: [ dev, test, qa, main ]
+    # Only trigger when THESE specific files change
+    paths:
+      - 'bigquery/clinical/synthea/bronze/tables/conditions.sql'
+      - 'bigquery/clinical/synthea/bronze/tables/encounters.sql'
+      - '.github/workflows/synthia_deploy_ddl_multi.yml'
+      # - 'bigquery/scripts/validate_schema.py'
 
-# ==========================
-# CONFIG
-# ==========================
-STANDARDS_PROJECT = "prj-lbd-shared-np"
-STANDARDS_DATASET = "ops_metadata"
-STANDARDS_TABLE = "standards_definition"
-TARGET_STANDARD_ID = "BRONZE_V1"
-TARGET_LAYER = "BRONZE"
+jobs:
+  deploy-ddl:
+    runs-on: ubuntu-latest
 
+    permissions:
+      id-token: write
+      contents: read
 
-# ==========================
-# IMPERSONATED CLIENT
-# ==========================
-def get_impersonated_bq_client(target_sa, project_id):
-    source_credentials, _ = default()
+    env:
+      # ⭐ EDIT THIS LIST WHEN YOU WANT MORE TABLES
+      SQL_FILES: |
+        bigquery/clinical/synthea/bronze/tables/conditions.sql
+        bigquery/clinical/synthea/bronze/tables/encounters.sql
 
-    impersonated_creds = ImpersonatedCredentials(
-        source_credentials=source_credentials,
-        target_principal=target_sa,
-        target_scopes=["https://www.googleapis.com/auth/cloud-platform"],
-        lifetime=300,
-    )
+    steps:
+      - uses: actions/checkout@v4
 
-    return bigquery.Client(credentials=impersonated_creds, project=project_id)
+      # -------------------------------------------
+      # STEP 1 — Determine environment (dev/test/qa/prod)
+      # -------------------------------------------
+      - name: Determine Target Environment
+        id: envset
+        run: |
+          BR="${{ github.ref_name }}"
+          case "$BR" in
+            dev)
+              PROJECT_ID="prj-clin-syn-np"
+              DATASET_ID="synthea_bronze_dev"
+              ;;
+            test)
+              PROJECT_ID="prj-clin-syn-np-test"
+              DATASET_ID="synthea_bronze_test"
+              ;;
+            qa)
+              PROJECT_ID="prj-clin-syn-np-qa"
+              DATASET_ID="synthea_bronze_qa"
+              ;;
+            main)
+              PROJECT_ID="prj-clin-syn-pd"
+              DATASET_ID="synthea_bronze"
+              ;;
+          esac
 
+          echo "PROJECT_ID=$PROJECT_ID" >> $GITHUB_OUTPUT
+          echo "DATASET_ID=$DATASET_ID" >> $GITHUB_OUTPUT
 
-# ==========================
-# NORMALIZE TYPES
-# ==========================
-def normalize_type(t):
-    if not t:
-        return None
+      # -------------------------------------------
+      # STEP 2 — Authenticate via WIF
+      # -------------------------------------------
+      - name: Authenticate to Google Cloud (WIF)
+        uses: google-github-actions/auth@v2
+        with:
+          service_account: ${{ secrets.GCP_SA_EMAIL }}
+          workload_identity_provider: ${{ secrets.GCP_WIF_PROVIDER_ID }}
 
-    t = t.upper()
+      # -------------------------------------------
+      # STEP 3 — Setup Python tools
+      # -------------------------------------------
+      - uses: actions/setup-python@v4
+        with:
+          python-version: "3.x"
 
-    if t in ("TIMESTAMPTZ", "TIMESTAMPZ"):
-        return "TIMESTAMP"
-    if t == "TEXT":
-        return "STRING"
-    if t in ("INT", "INTEGER"):
-        return "INT64"
-    if t == "DATETIME":
-        return "TIMESTAMP"
+      - run: pip install sqlglot google-cloud-bigquery google-auth google-auth-impersonated-credentials
 
-    return t
+      # -------------------------------------------
+      # STEP 4 — Impersonate SA for VALIDATION
+      # -------------------------------------------
+      - name: Impersonate Service Account (Validation)
+        env:
+          TARGET_SA_EMAIL: project-service-account@${{ steps.envset.outputs.PROJECT_ID }}.iam.gserviceaccount.com
+        run: |
+          gcloud config set auth/impersonate_service_account "$TARGET_SA_EMAIL"
 
+      # -------------------------------------------
+      # STEP 5 — VALIDATE EACH SQL FILE
+      # -------------------------------------------
+      - name: Validate DDLs
+        run: |
+          for FILE in ${{ env.SQL_FILES }}; do
+            echo "Validating $FILE"
+            python bigquery/scripts/validate_schema.py \
+              --sql_file "$FILE" \
+              --project "${{ steps.envset.outputs.PROJECT_ID }}" \
+              --dataset "${{ steps.envset.outputs.DATASET_ID }}"
+          done
 
-# ==========================
-# PREPROCESS SQL (remove {{ }}, backticks)
-# ==========================
-def preprocess_sql(sql):
-    sql = re.sub(r"\{\{.*?\}\}", "TEMPLATE", sql)
-    sql = re.sub(r"\$\{.*?\}", "TEMPLATE", sql)
-    sql = re.sub(r"`([^`]*)`", lambda m: m.group(1).replace(".", "_"), sql)
-    return sql
+      # -------------------------------------------
+      # STEP 6 — Impersonate AGAIN for Deployment
+      # -------------------------------------------
+      - name: Impersonate Service Account (Deployment)
+        env:
+          TARGET_SA_EMAIL: project-service-account@${{ steps.envset.outputs.PROJECT_ID }}.iam.gserviceaccount.com
+        run: |
+          gcloud config set auth/impersonate_service_account "$TARGET_SA_EMAIL"
 
-
-# ==========================
-# PARSE SQL DDL
-# ==========================
-def parse_sql(sql_file):
-    text = preprocess_sql(open(sql_file).read())
-
-    try:
-        parsed = sqlglot.parse_one(text, read="bigquery")
-    except Exception as e:
-        print(f"::error::Unable to parse DDL {sql_file}: {e}")
-        sys.exit(1)
-
-    cols = {}
-    for c in parsed.find_all(sqlglot.exp.ColumnDef):
-        col = c.name.lower()
-        kind = c.args.get("kind")
-        if kind:
-            cols[col] = normalize_type(kind.sql())
-
-    # Partition
-    part_exprs = parsed.find_all(sqlglot.exp.Partition)
-    partitions = set()
-    for p in part_exprs:
-        for ex in p.expressions:
-            if hasattr(ex, "name"):
-                partitions.add(ex.name.lower())
-            elif hasattr(ex, "expressions"):
-                inner = ex.expressions[0]
-                if hasattr(inner, "name"):
-                    partitions.add(inner.name.lower())
-
-    # Cluster
-    clust = parsed.find(sqlglot.exp.Cluster)
-    clusters = set()
-    if clust:
-        clusters = {ex.name.lower() for ex in clust.expressions}
-
-    return cols, partitions, clusters
-
-
-# ==========================
-# LOAD STANDARDS
-# ==========================
-def load_standards(bq):
-    query = f"""
-        SELECT column_name, expected_type, is_mandatory,
-               is_partition_col, is_cluster_col
-        FROM `{STANDARDS_PROJECT}.{STANDARDS_DATASET}.{STANDARDS_TABLE}`
-        WHERE standard_id = '{TARGET_STANDARD_ID}'
-          AND layer = '{TARGET_LAYER}'
-    """
-
-    rows = list(bq.query(query).result())
-    if not rows:
-        print("::error::No standards found.")
-        sys.exit(1)
-
-    required_cols = {}
-    partitions = set()
-    clusters = set()
-
-    for r in rows:
-        name = r.column_name.lower()
-        required_cols[name] = r.expected_type.upper()
-        if r.is_partition_col:
-            partitions.add(name)
-        if r.is_cluster_col:
-            clusters.add(name)
-
-    return required_cols, partitions, clusters
-
-
-# ==========================
-# VALIDATE SQL DDL
-# ==========================
-def validate(sql_file, bq_project):
-
-    print(f"\nVALIDATING: {sql_file}")
-
-    # Impersonated client hitting shared standards project
-    target_sa = f"project-service-account@{bq_project}.iam.gserviceaccount.com"
-    bq = get_impersonated_bq_client(target_sa, STANDARDS_PROJECT)
-
-    ddl_cols, ddl_parts, ddl_clust = parse_sql(sql_file)
-    req_cols, req_parts, req_clust = load_standards(bq)
-
-    # Missing columns
-    missing = [c for c in req_cols if c not in ddl_cols]
-    if missing:
-        print(f"::error::DDL missing columns: {missing}")
-        sys.exit(1)
-
-    # Type mismatches
-    mismatches = []
-    for c, exp in req_cols.items():
-        if ddl_cols[c] != exp:
-            mismatches.append(f"{c}: expected {exp}, found {ddl_cols[c]}")
-    if mismatches:
-        print("::error::Column type mismatches:\n" + "\n".join(mismatches))
-        sys.exit(1)
-
-    # Partition required
-    if req_parts and not ddl_parts:
-        print(f"::error::DDL missing PARTITION BY. Required: {req_parts}")
-        sys.exit(1)
-
-    if req_parts and not (ddl_parts & req_parts):
-        print(f"::error::Incorrect partition. Required: {req_parts}, Found: {ddl_parts}")
-        sys.exit(1)
-
-    # Cluster required
-    if req_clust and not req_clust.issubset(ddl_clust):
-        print(f"::error::Missing cluster columns: {req_clust - ddl_clust}")
-        sys.exit(1)
-
-    print("DDL Validation Passed ✔")
-
-
-# ==========================
-# MAIN
-# ==========================
-if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--sql_file", required=True)
-    parser.add_argument("--project", required=True)
-    parser.add_argument("--dataset", required=True)
-    args = parser.parse_args()
-
-    validate(args.sql_file, args.project)
+      # -------------------------------------------
+      # STEP 7 — DEPLOY THE SQL FILES
+      # -------------------------------------------
+      - name: Deploy SQL Files
+        run: |
+          PROJECT="${{ steps.envset.outputs.PROJECT_ID }}"
+          for FILE in ${{ env.SQL_FILES }}; do
+            echo "Deploying $FILE ..."
+            bq --project_id="$PROJECT" query --use_legacy_sql=false < "$FILE"
+          done
+          echo "Deployment complete."
