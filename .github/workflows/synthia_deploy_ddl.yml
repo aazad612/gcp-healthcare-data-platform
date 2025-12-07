@@ -110,7 +110,7 @@ jobs:
           bq query \
              --use_legacy_sql=false \
              --project_id="${{ env.TARGET_PROJECT_ID }}" \
-             --default_dataset="${{ env.TARGET_DATASET_ID }}" \
-             < ${{ env.SQL_FILE_PATH }}
+             --dataset="${{ env.TARGET_DATASET_ID }}" \
+             --sql_file="${{ env.SQL_FILE_PATH }}""
           
           echo "Deployment successful."
