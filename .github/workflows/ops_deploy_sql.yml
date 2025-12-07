@@ -6,7 +6,10 @@ on:
   push:
     branches:
       - main
-
+    paths:
+      - 'bigquery/ops/**'
+      - '.github/workflows/ops_deploy_sql.yml'
+      
 jobs:
   deploy_bq_migration:
     runs-on: ubuntu-latest
