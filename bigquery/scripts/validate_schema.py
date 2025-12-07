@@ -215,6 +215,21 @@ def validate_sql_ddl(sql_file, required_columns, required_partitions, required_c
 # VALIDATE EXISTING BQ TABLE
 # ---------------------------------------------
 
+def debug_identity(project_id):
+    """
+    Runs SELECT SESSION_USER() to confirm which identity BigQuery sees.
+    """
+    try:
+        client = bigquery.Client(project=project_id)
+        debug_query = "SELECT SESSION_USER() as identity"
+        result = list(client.query(debug_query).result())
+        print(f"DEBUG: BigQuery sees identity: {result[0].identity}")
+    except Exception as e:
+        print(f"DEBUG ERROR: Unable to detect identity: {e}")
+
+
+
+
 def validate_existing_table(project, dataset, table, required_columns, required_partitions, required_clusters):
 
     client = bigquery.Client(project=project)
@@ -291,4 +306,7 @@ if __name__ == "__main__":
     parser.add_argument("--dataset", required=True)
 
     args = parser.parse_args()
+
+    debug_identity(args.project)
+
     main(args.sql_file, args.project, args.dataset)
