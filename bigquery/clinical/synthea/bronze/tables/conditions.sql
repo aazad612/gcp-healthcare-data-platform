@@ -27,4 +27,4 @@ CREATE TABLE IF NOT EXISTS conditions (
     meta_updated_date TIMESTAMP
 )
 PARTITION BY DATE(meta_ingest_timestamp)
-CLUSTER BY id, meta_source_filedate;
+CLUSTER BY meta_row_uuid;
