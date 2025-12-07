@@ -20,7 +20,7 @@ jobs:
     # 🔥 YOU CONTROL WHICH FILES ARE DEPLOYED HERE
     env:
       FILE_LIST: >
-        bigquery/clinical/synthea/bronze/tables/conditions.sql.
+        bigquery/clinical/synthea/bronze/tables/conditions.sql,
         bigquery/clinical/synthea/bronze/tables/encounters.sql
 
 
