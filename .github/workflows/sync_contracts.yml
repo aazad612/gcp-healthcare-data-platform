@@ -1,112 +1,71 @@
-name: 🚚 Sync Data Contracts & Ingestion Configs to GCS
+name: Sync Data Contracts → GCS
 
 on:
   push:
-    branches: [ main ]
+    branches:
+      - dev
+      - main
     paths:
       - 'bigquery/**/contracts/**'
       - 'bigquery/**/ingestion_configs/**'
-
-permissions:
-  id-token: write
-  contents: read
+      - '.github/workflows/sync_contracts.yml'
 
 jobs:
-  sync_contracts:
+  sync-contracts:
     runs-on: ubuntu-latest
 
-    steps:
-      # ------------------------------
-      # Checkout
-      # ------------------------------
-      - uses: actions/checkout@v4
+    env:
+      NP_BUCKET: bkt-clin-syn-configs-np
+      PD_BUCKET: bkt-clin-syn-configs-pd
 
-      # ------------------------------
-      # Authenticate to GCP
-      # ------------------------------
-      - name: GCP Auth via Workload Identity Federation
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      # Identify environment based on branch
+      - name: Determine target bucket
+        id: envcheck
+        run: |
+          BRANCH="${GITHUB_REF_NAME}"
+
+          echo "Branch: $BRANCH"
+
+          if [[ "$BRANCH" == "dev" ]]; then
+            echo "bucket=${NP_BUCKET}" >> $GITHUB_OUTPUT
+            echo "env=np" >> $GITHUB_OUTPUT
+
+          elif [[ "$BRANCH" == "main" ]]; then
+            echo "bucket=${PD_BUCKET}" >> $GITHUB_OUTPUT
+            echo "env=pd" >> $GITHUB_OUTPUT
+
+          else
+            echo "::warning::Branch $BRANCH does not require sync. Skipping."
+            exit 0
+          fi
+
+      # Authenticate with WIF
+      - name: Authenticate to Google Cloud
         uses: google-github-actions/auth@v2
         with:
           workload_identity_provider: ${{ secrets.GCP_WIF_PROVIDER_ID }}
           service_account: ${{ secrets.GCP_SA_EMAIL }}
 
-      # ------------------------------
-      # Install gcloud CLI
-      # ------------------------------
       - name: Install gcloud
         uses: google-github-actions/setup-gcloud@v2
 
-      # ------------------------------
-      # Identify Domain Automatically
-      # ------------------------------
-      - name: Determine affected domain(s)
-        id: domain
+      # Perform sync
+      - name: Sync contracts + configs to GCS
         run: |
-          echo "Changed files:"
-          git diff --name-only HEAD~1 HEAD
+          TARGET_BUCKET="${{ steps.envcheck.outputs.bucket }}"
 
-          DOMAINS=$(git diff --name-only HEAD~1 HEAD \
-            | grep 'bigquery' \
-            | awk -F'/' '{print $3}' \
-            | sort -u)
+          echo "Syncing to bucket: $TARGET_BUCKET"
 
-          if [[ -z "$DOMAINS" ]]; then
-            echo "::warning::Could not detect domain from folder structure."
-            exit 0
-          fi
+          gsutil -m rsync -r \
+            bigquery/clinical/synthea/bronze/contracts \
+            gs://$TARGET_BUCKET/contracts
 
-          echo "Detected domains: $DOMAINS"
-          echo "domains=$DOMAINS" >> $GITHUB_OUTPUT
+          gsutil -m rsync -r \
+            bigquery/clinical/synthea/bronze/ingestion_configs \
+            gs://$TARGET_BUCKET/ingestion_configs
 
-      # ------------------------------
-      # Sync Contracts to GCS
-      # ------------------------------
-      - name: Sync contract + ingestion config files to GCS
-        id: sync
-        run: |
-          PROJECT_PD="prj-clin-syn-pd"
-          PROJECT_NP="prj-clin-syn-np"
-
-          BUCKET_PD="bkt-clin-syn-lake-prod-${PROJECT_PD}"
-          BUCKET_NP="bkt-clin-syn-lake-dev-${PROJECT_NP}"
-
-          for DOMAIN in ${{ steps.domain.outputs.domains }}; do
-            echo "==== Syncing DOMAIN: $DOMAIN ===="
-
-            SRC_CONTRACTS="bigquery/clinical/${DOMAIN}/bronze/contracts"
-            SRC_CONFIGS="bigquery/clinical/${DOMAIN}/bronze/ingestion_configs"
-
-            # ------------------------------
-            # Copy to NP bucket
-            # ------------------------------
-            if [[ -d "$SRC_CONTRACTS" ]]; then
-              echo "Copying contracts → NP bucket"
-              gsutil -m cp -r "$SRC_CONTRACTS" "gs://${BUCKET_NP}/contracts/${DOMAIN}/"
-            fi
-
-            if [[ -d "$SRC_CONFIGS" ]]; then
-              echo "Copying ingestion configs → NP bucket"
-              gsutil -m cp -r "$SRC_CONFIGS" "gs://${BUCKET_NP}/ingestion_configs/${DOMAIN}/"
-            fi
-
-            # ------------------------------
-            # Copy to PD bucket
-            # ------------------------------
-            echo "Copying to PROD bucket too"
-
-            if [[ -d "$SRC_CONTRACTS" ]]; then
-              gsutil -m cp -r "$SRC_CONTRACTS" "gs://${BUCKET_PD}/contracts/${DOMAIN}/"
-            fi
-
-            if [[ -d "$SRC_CONFIGS" ]]; then
-              gsutil -m cp -r "$SRC_CONFIGS" "gs://${BUCKET_PD}/ingestion_configs/${DOMAIN}/"
-            fi
-
-            echo "✓ Completed sync for DOMAIN: $DOMAIN"
-          done
-
-      # ------------------------------
-      # Done
-      # ------------------------------
-      - name: Completed
-        run: echo "🎉 Contracts + ingestion configs sync complete."
+          echo "Sync completed."
