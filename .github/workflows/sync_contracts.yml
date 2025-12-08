@@ -1,76 +1,84 @@
-name: Sync Data Contracts → GCS
+name: 🚚 Sync Data Contracts to GCS
 
 on:
   push:
-    branches:
-      - dev
-      - main
+    branches: [ dev, main ]
     paths:
-      - 'bigquery/**/contracts/**'
-      - 'bigquery/**/ingestion_configs/**'
+      - 'bigquery/clinical/synthea/bronze/contracts/**'
+      - 'bigquery/clinical/synthea/bronze/ingestion_configs/**'
       - '.github/workflows/sync_contracts.yml'
 
-permissions:
-  id-token: write
-  contents: read
-
-
 jobs:
-  sync-contracts:
+  sync_contracts:
     runs-on: ubuntu-latest
 
-    env:
-      NP_BUCKET: bkt-clin-syn-configs-np
-      PD_BUCKET: bkt-clin-syn-configs-pd
+    permissions:
+      id-token: write
+      contents: read
 
     steps:
-      - name: Checkout repo
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      # Identify environment based on branch
-      - name: Determine target bucket
-        id: envcheck
+      # ---------------------------------------------------
+      # 1. Select TARGET PROJECT + TARGET BUCKET
+      # ---------------------------------------------------
+      - name: Determine Environment Bucket
+        id: env_vars
         run: |
           BRANCH="${GITHUB_REF_NAME}"
 
-          echo "Branch: $BRANCH"
-
-          if [[ "$BRANCH" == "dev" ]]; then
-            echo "bucket=${NP_BUCKET}" >> $GITHUB_OUTPUT
-            echo "env=np" >> $GITHUB_OUTPUT
-
-          elif [[ "$BRANCH" == "main" ]]; then
-            echo "bucket=${PD_BUCKET}" >> $GITHUB_OUTPUT
-            echo "env=pd" >> $GITHUB_OUTPUT
-
+          if [[ "$BRANCH" == "main" ]]; then
+            # ---- PROD ----
+            echo "TARGET_PROJECT=prj-lbd-shared-pd" >> $GITHUB_ENV
+            echo "TARGET_BUCKET=bkt-clin-syn-configs-pd" >> $GITHUB_ENV
+            echo "TARGET_SA=project-service-account@prj-lbd-shared-pd.iam.gserviceaccount.com" >> $GITHUB_ENV
           else
-            echo "::warning::Branch $BRANCH does not require sync. Skipping."
-            exit 0
+            # ---- DEV / TEST / QA (only dev triggers pipeline) ----
+            echo "TARGET_PROJECT=prj-lbd-shared-np" >> $GITHUB_ENV
+            echo "TARGET_BUCKET=bkt-clin-syn-configs-np" >> $GITHUB_ENV
+            echo "TARGET_SA=project-service-account@prj-lbd-shared-np.iam.gserviceaccount.com" >> $GITHUB_ENV
           fi
 
-      # Authenticate with WIF
-      - name: Authenticate to Google Cloud
+          echo "Environment resolved:"
+          echo "  → Bucket: $TARGET_BUCKET"
+          echo "  → Target SA: $TARGET_SA"
+
+      # ---------------------------------------------------
+      # 2. Authenticate via Workload Identity Federation
+      # ---------------------------------------------------
+      - name: Authenticate to Google Cloud via WIF
         uses: google-github-actions/auth@v2
         with:
           workload_identity_provider: ${{ secrets.GCP_WIF_PROVIDER_ID }}
           service_account: ${{ secrets.GCP_SA_EMAIL }}
 
-      - name: Install gcloud
-        uses: google-github-actions/setup-gcloud@v2
-
-      # Perform sync
-      - name: Sync contracts + configs to GCS
+      # ---------------------------------------------------
+      # 3. Impersonate ENV-SPECIFIC project-service-account
+      # ---------------------------------------------------
+      - name: Impersonate Target Project SA
         run: |
-          TARGET_BUCKET="${{ steps.envcheck.outputs.bucket }}"
+          echo "Setting impersonation for: $TARGET_SA"
+          gcloud config set auth/impersonate_service_account "$TARGET_SA"
 
-          echo "Syncing to bucket: $TARGET_BUCKET"
+      # ---------------------------------------------------
+      # 4. Sync contracts + ingestion configs to GCS
+      # ---------------------------------------------------
+      - name: Sync Contract Files to GCS
+        run: |
+          echo "Syncing to bucket: gs://$TARGET_BUCKET/"
 
-          gsutil -m rsync -r \
-            bigquery/clinical/synthea/bronze/contracts \
-            gs://$TARGET_BUCKET/contracts
+          # Ensure folder structure exists
+          gcloud storage mkdir -p gs://$TARGET_BUCKET/contracts/
+          gcloud storage mkdir -p gs://$TARGET_BUCKET/ingestion_configs/
 
-          gsutil -m rsync -r \
-            bigquery/clinical/synthea/bronze/ingestion_configs \
-            gs://$TARGET_BUCKET/ingestion_configs
+          # Copy the contracts
+          gcloud storage cp -r \
+            bigquery/clinical/synthea/bronze/contracts/* \
+            gs://$TARGET_BUCKET/contracts/
 
-          echo "Sync completed."
+          # Copy ingestion configs
+          gcloud storage cp -r \
+            bigquery/clinical/synthea/bronze/ingestion_configs/* \
+            gs://$TARGET_BUCKET/ingestion_configs/
+
+          echo "✅ Sync complete."
