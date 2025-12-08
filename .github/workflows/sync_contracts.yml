@@ -10,6 +10,11 @@ on:
       - 'bigquery/**/ingestion_configs/**'
       - '.github/workflows/sync_contracts.yml'
 
+permissions:
+  id-token: write
+  contents: read
+
+
 jobs:
   sync-contracts:
     runs-on: ubuntu-latest
