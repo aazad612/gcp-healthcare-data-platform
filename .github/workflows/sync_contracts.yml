@@ -71,7 +71,19 @@ jobs:
           gcloud storage buckets create gs://$TARGET_BUCKET --location=US 2>/dev/null || true
 
           # Upload everything under contracts + ingestion configs
-          gcloud storage cp -r bigquery/clinical/synthea/bronze/contracts/* gs://$TARGET_BUCKET/contracts/ --recursive
-          gcloud storage cp -r bigquery/clinical/synthea/bronze/ingestion_configs/* gs://$TARGET_BUCKET/ingestion_configs/ --recursive
+          if compgen -G "bigquery/clinical/synthea/bronze/ingestion_configs/*" > /dev/null; then
+            echo "Uploading ingestion configs..."
+            gcloud storage rsync -r bigquery/clinical/synthea/bronze/ingestion_configs gs://$TARGET_BUCKET/ingestion_configs
+          else
+            echo "No ingestion configs found. Skipping."
+          fi
+
+          if compgen -G "bigquery/clinical/synthea/bronze/contracts/*" > /dev/null; then
+            echo "Uploading contract files..."
+            gcloud storage rsync -r bigquery/clinical/synthea/bronze/contracts gs://$TARGET_BUCKET/contracts
+          else
+            echo "No contract files found. Skipping."
+          fi
+
 
           echo "✅ Sync complete."
