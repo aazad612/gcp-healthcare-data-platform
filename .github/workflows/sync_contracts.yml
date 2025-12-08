@@ -67,18 +67,11 @@ jobs:
         run: |
           echo "Syncing to bucket: gs://$TARGET_BUCKET/"
 
-          # Ensure folder structure exists
-          gcloud storage mkdir -p gs://$TARGET_BUCKET/contracts/
-          gcloud storage mkdir -p gs://$TARGET_BUCKET/ingestion_configs/
+          # Ensure bucket exists (safe if already exists)
+          gcloud storage buckets create gs://$TARGET_BUCKET --location=US 2>/dev/null || true
 
-          # Copy the contracts
-          gcloud storage cp -r \
-            bigquery/clinical/synthea/bronze/contracts/* \
-            gs://$TARGET_BUCKET/contracts/
-
-          # Copy ingestion configs
-          gcloud storage cp -r \
-            bigquery/clinical/synthea/bronze/ingestion_configs/* \
-            gs://$TARGET_BUCKET/ingestion_configs/
+          # Upload everything under contracts + ingestion configs
+          gcloud storage cp -r bigquery/clinical/synthea/bronze/contracts/* gs://$TARGET_BUCKET/contracts/ --recursive
+          gcloud storage cp -r bigquery/clinical/synthea/bronze/ingestion_configs/* gs://$TARGET_BUCKET/ingestion_configs/ --recursive
 
           echo "✅ Sync complete."
