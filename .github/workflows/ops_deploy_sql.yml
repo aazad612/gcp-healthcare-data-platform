@@ -92,9 +92,18 @@ jobs:
           echo "====================================================="
 
           # Convert CSV → space-separated list
-          NORMALIZED_LIST=$(echo "$FILE_LIST" | tr ',' ' ' | xargs)
+          NORMALIZED_LIST=$(echo "$FILE_LIST" \
+              | tr ',' ' ' \
+              | sed 's/"//g' \
+              | xargs)
+
 
           for SQL_FILE in $NORMALIZED_LIST; do
+
+            if [[ -z "$SQL_FILE" ]]; then
+              continue
+            fi
+
             echo ""
             echo "======================================"
             echo " DEPLOYING: $SQL_FILE"

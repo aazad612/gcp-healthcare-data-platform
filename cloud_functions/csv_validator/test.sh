@@ -8,3 +8,8 @@ gcloud functions deploy synthea-validate-gcs \
   --trigger-event-filters="bucket=bkt-clin-syn-lake-dev-prj-clin-syn-np" \
   --service-account=project-service-account@prj-lbd-shared-np.iam.gserviceaccount.com \
   --memory=256MB
+
+
+
+
+incoming/synthea/2025-01-05/synthea/conditions_synthea-20250101.csv
