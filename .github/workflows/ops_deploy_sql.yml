@@ -67,10 +67,7 @@ jobs:
       # --------------------------
       # DEPLOYMENT LOGIC
       # --------------------------
-      # - name: Conditional Deployment
-
-        run: |
-          echo "Starting deployment for environment: ${{ matrix.env }}"
+      
       - name: Validate + Deploy SQL
         env:
           PROJECT_ID: ${{ matrix.PROJECT_ID }}
