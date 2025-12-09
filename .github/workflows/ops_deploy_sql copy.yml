@@ -19,11 +19,6 @@ jobs:
         bigquery/ops/tables/file_ingestion_audit.sql,
         bigquery/ops/tables/standards_definition.sql
 
-    if: ${{ 
-            (matrix.env == 'dev'  && github.ref_name == 'dev') ||
-            (matrix.env == 'prod' && github.ref_name == 'main')
-          }}
-
     # --------------------------
     # MATRIX CONFIG
     # --------------------------

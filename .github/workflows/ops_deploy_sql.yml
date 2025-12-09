@@ -1,1 +1,118 @@
-gcp-healthcare-data-platform/.github/workflows/ops_deploy_sql.yml
+name: Multi-Env SQL Deployment
+
+on:
+  push:
+    branches: [ dev, main ]
+    paths:
+      - "bigquery/ops/tables/**"
+      - ".github/workflows/ops_deploy_sql.yml"
+
+# ---------------------------------------------------------
+# GLOBAL VARS
+# ---------------------------------------------------------
+env:
+  FILE_LIST: >
+    bigquery/ops/tables/file_ingestion_audit.sql,
+    bigquery/ops/tables/standards_definition.sql
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    permissions:
+      id-token: write
+      contents: read
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      # ---------------------------------------------------
+      # AUTHENTICATE USING WIF (ambient identity)
+      # ---------------------------------------------------
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WIF_PROVIDER_ID }}
+          service_account: ${{ secrets.GCP_SA_EMAIL }}
+
+      # ---------------------------------------------------
+      # PRINT DEBUG INFO
+      # ---------------------------------------------------
+      - name: Determine Target Environment Variables
+        id: env_vars
+        run: |
+          BRANCH_NAME="${{ github.ref_name }}"
+
+          case "$BRANCH_NAME" in
+            dev)
+              env: dev
+              TARGET_PROJECT_ID: prj-lbd-shared-np
+              TARGET_SA_EMAIL: project-service-account@prj-lbd-shared-np.iam.gserviceaccount.com
+              DATASET_ID: ops_metadata
+              ;;
+            main)
+              env: prod
+              TARGET_PROJECT_ID: prj-lbd-shared-pd
+              TARGET_SA_EMAIL: project-service-account@prj-lbd-shared-pd.iam.gserviceaccount.com
+              DATASET_ID: ops_metadata
+              ;;
+
+
+      # ---------------------------------------------------
+      # IMPERSONATE TARGET SA (this gives bq jobs.create)
+      # ---------------------------------------------------
+      - name: Impersonate Target Service Account
+        run: |
+          gcloud config set auth/impersonate_service_account "${{ steps.env_vars.output.TARGET_SA_EMAIL }}"
+
+      # ---------------------------------------------------
+      # RUN SQL VALIDATION + DEPLOYMENT
+      # ---------------------------------------------------
+          
+      - name: Validate + Deploy SQL Files
+        shell: bash
+        env:
+          ENV              : ${{ steps.env_vars.outputs.env }}
+          TARGET PROJECT   : ${{ steps.env_vars.outputs.TARGET_PROJECT_ID }}
+          TARGET SA        : ${{ steps.env_vars.outputs.TARGET_SA_EMAIL }}
+          DATASET ID       : ${{ steps.env_vars.outputs.DATASET_ID }}
+        run: |
+          # Normalize CSV list → space-separated list
+          NORMALIZED_LIST=$(echo "$FILE_LIST" | tr ',' ' ' | xargs)
+
+          for SQL_FILE in $NORMALIZED_LIST; do
+            echo ""
+            echo "======================================"
+            echo "Deploying SQL: $SQL_FILE"
+            echo "======================================"
+
+            if [[ ! -f "$SQL_FILE" ]]; then
+              echo "::error::File not found: $SQL_FILE"
+              exit 1
+            fi
+
+            # -----------------------------
+            # 1. SUBSTITUTE PROJECT + DATASET
+            # -----------------------------
+            TEMP_SQL=$(mktemp)
+
+            sed -e "s/{{PROJECT_ID}}/$TARGET_PROJECT_ID/g" \
+                -e "s/{{DATASET_ID}}/$DATASET_ID/g" \
+                "$SQL_FILE" > "$TEMP_SQL"
+
+            echo "--- Running SQL with substitutions applied:"
+            cat "$TEMP_SQL"
+
+            # -----------------------------
+            # 2. EXECUTE USING bq query
+            # -----------------------------
+            bq query \
+              --use_legacy_sql=false \
+              --project_id="$TARGET_PROJECT_ID" \
+              < "$TEMP_SQL"
+
+            echo "✔ Successfully executed: $SQL_FILE"
+          done
+
+          echo "🎉 All SQL files deployed successfully for env: $ENV"
