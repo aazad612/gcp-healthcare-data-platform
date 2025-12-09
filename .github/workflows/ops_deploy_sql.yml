@@ -111,6 +111,8 @@ jobs:
 
             TEMP_SQL=$(mktemp)
 
+            echo $TEMP_SQL
+
             sed \
               -e "s/{{PROJECT_ID}}/$TARGET_PROJECT_ID/g" \
               -e "s/{{DATASET_ID}}/$DATASET_ID/g" \
