@@ -19,23 +19,29 @@ jobs:
         bigquery/ops/tables/file_ingestion_audit.sql,
         bigquery/ops/tables/standards_definition.sql
 
+    if: ${{ 
+            (matrix.env == 'dev'  && github.ref_name == 'dev') ||
+            (matrix.env == 'prod' && github.ref_name == 'main')
+          }}
 
     # --------------------------
     # MATRIX CONFIG
     # --------------------------
     strategy:
       matrix:
-        env: [dev, prod]
+        env: [ dev, prod ]
         include:
           - env: dev
-            PROJECT_ID: prj-clin-syn-np
-            TARGET_SA: project-service-account@prj-clin-syn-np.iam.gserviceaccount.com
-            DATASET_ID: synthea_bronze_dev
+            TARGET_PROJECT_ID: prj-lbd-shared-np
+            TARGET_SA_EMAIL: project-service-account@prj-lbd-shared-np.iam.gserviceaccount.com
+            DATASET_ID: ops_metadata
 
           - env: prod
-            PROJECT_ID: prj-clin-syn-pd
-            TARGET_SA: project-service-account@prj-clin-syn-pd.iam.gserviceaccount.com
-            DATASET_ID: synthea_bronze
+            TARGET_PROJECT_ID: prj-lbd-shared-pd
+            TARGET_SA_EMAIL: project-service-account@prj-lbd-shared-pd.iam.gserviceaccount.com
+            DATASET_ID: ops_metadata
+
+    # ---- RUN DEV ONLY ON DEV BRANCH, PROD ONLY ON MAIN ----
 
     permissions:
       id-token: write
@@ -61,6 +67,10 @@ jobs:
       # --------------------------
       # DEPLOYMENT LOGIC
       # --------------------------
+      # - name: Conditional Deployment
+
+        run: |
+          echo "Starting deployment for environment: ${{ matrix.env }}"
       - name: Validate + Deploy SQL
         env:
           PROJECT_ID: ${{ matrix.PROJECT_ID }}
@@ -72,6 +82,8 @@ jobs:
           echo "Target SA     : $TARGET_SA"
           echo "Dataset       : $DATASET_ID"
           echo "File List     : $FILE_LIST"
+
+          gcloud config set auth/impersonate_service_account "${{ env.TARGET_SA }}"
 
           # Normalize comma-separated list into clean loopable items
           NORMALIZED_LIST=$(echo "$FILE_LIST" \
