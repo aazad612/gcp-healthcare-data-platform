@@ -1,4 +1,4 @@
-name: Multi-Env SQL Deployment
+name: Multi-Env OPS SQL Deployment
 
 on:
   push:
@@ -8,7 +8,7 @@ on:
       - ".github/workflows/ops_deploy_sql.yml"
 
 # ---------------------------------------------------------
-# GLOBAL VARS
+# GLOBAL VARS (Shared file list)
 # ---------------------------------------------------------
 env:
   FILE_LIST: >
@@ -16,7 +16,7 @@ env:
     bigquery/ops/tables/standards_definition.sql
 
 jobs:
-  deploy:
+  deploy_ops_sql:
     runs-on: ubuntu-latest
 
     permissions:
@@ -24,95 +24,102 @@ jobs:
       contents: read
 
     steps:
+
+      # -----------------------------------------------------
+      # CHECKOUT
+      # -----------------------------------------------------
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      # ---------------------------------------------------
-      # AUTHENTICATE USING WIF (ambient identity)
-      # ---------------------------------------------------
-      - name: Authenticate to Google Cloud
+      # -----------------------------------------------------
+      # AUTHENTICATE WIF (Ambient Identity)
+      # -----------------------------------------------------
+      - name: Authenticate to Google Cloud (WIF)
         uses: google-github-actions/auth@v2
         with:
           workload_identity_provider: ${{ secrets.GCP_WIF_PROVIDER_ID }}
           service_account: ${{ secrets.GCP_SA_EMAIL }}
 
-      # ---------------------------------------------------
-      # PRINT DEBUG INFO
-      # ---------------------------------------------------
-      - name: Determine Target Environment Variables
-        id: env_vars
+      # -----------------------------------------------------
+      # DETERMINE DEV vs PROD TARGETS
+      # -----------------------------------------------------
+      - name: Set Deployment Environment Vars
+        id: set_vars
         run: |
-          BRANCH_NAME="${{ github.ref_name }}"
+          BRANCH="${{ github.ref_name }}"
 
-          case "$BRANCH_NAME" in
-            dev)
-              env: dev
-              TARGET_PROJECT_ID: prj-lbd-shared-np
-              TARGET_SA_EMAIL: project-service-account@prj-lbd-shared-np.iam.gserviceaccount.com
-              DATASET_ID: ops_metadata
-              ;;
-            main)
-              env: prod
-              TARGET_PROJECT_ID: prj-lbd-shared-pd
-              TARGET_SA_EMAIL: project-service-account@prj-lbd-shared-pd.iam.gserviceaccount.com
-              DATASET_ID: ops_metadata
-              ;;
+          if [[ "$BRANCH" == "dev" ]]; then
+            echo "TARGET_PROJECT_ID=prj-lbd-shared-np" >> $GITHUB_OUTPUT
+            echo "TARGET_SA_EMAIL=project-service-account@prj-lbd-shared-np.iam.gserviceaccount.com" >> $GITHUB_OUTPUT
+            echo "DATASET_ID=ops_metadata" >> $GITHUB_OUTPUT
+            echo "DEPLOY_ENV=dev" >> $GITHUB_OUTPUT
+          elif [[ "$BRANCH" == "main" ]]; then
+            echo "TARGET_PROJECT_ID=prj-lbd-shared-pd" >> $GITHUB_OUTPUT
+            echo "TARGET_SA_EMAIL=project-service-account@prj-lbd-shared-pd.iam.gserviceaccount.com" >> $GITHUB_OUTPUT
+            echo "DATASET_ID=ops_metadata" >> $GITHUB_OUTPUT
+            echo "DEPLOY_ENV=prod" >> $GITHUB_OUTPUT
+          else
+            echo "::error::Branch '$BRANCH' is not mapped to a deploy environment."
+            exit 1
+          fi
 
+      # -----------------------------------------------------
+      # PYTHON FOR SQL VALIDATOR
+      # -----------------------------------------------------
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
 
-      # ---------------------------------------------------
-      # IMPERSONATE TARGET SA (this gives bq jobs.create)
-      # ---------------------------------------------------
-      - name: Impersonate Target Service Account
-        run: |
-          gcloud config set auth/impersonate_service_account "${{ steps.env_vars.output.TARGET_SA_EMAIL }}"
+      - name: Install Libraries
+        run: pip install sqlglot google-cloud-bigquery google-auth
 
-      # ---------------------------------------------------
-      # RUN SQL VALIDATION + DEPLOYMENT
-      # ---------------------------------------------------
-          
+      # -----------------------------------------------------
+      # VALIDATE + DEPLOY SQL
+      # -----------------------------------------------------
       - name: Validate + Deploy SQL Files
-        shell: bash
         env:
-          ENV               : ${{ steps.env_vars.outputs.env }}
-          TARGET_PROJECT_ID : ${{ steps.env_vars.outputs.TARGET_PROJECT_ID }}
-          TARGET_SA         : ${{ steps.env_vars.outputs.TARGET_SA_EMAIL }}
-          DATASET_ID        : ${{ steps.env_vars.outputs.DATASET_ID }}
+          TARGET_PROJECT_ID: ${{ steps.set_vars.outputs.TARGET_PROJECT_ID }}
+          TARGET_SA_EMAIL: ${{ steps.set_vars.outputs.TARGET_SA_EMAIL }}
+          DATASET_ID: ${{ steps.set_vars.outputs.DATASET_ID }}
+          DEPLOY_ENV: ${{ steps.set_vars.outputs.DEPLOY_ENV }}
         run: |
-          # Normalize CSV list → space-separated list
+          echo "====================================================="
+          echo "🚀 Deploying OPS SQL to ENV: $DEPLOY_ENV"
+          echo "Project: $TARGET_PROJECT_ID"
+          echo "Target SA: $TARGET_SA_EMAIL"
+          echo "Dataset: $DATASET_ID"
+          echo "====================================================="
+
+          # Convert CSV → space-separated list
           NORMALIZED_LIST=$(echo "$FILE_LIST" | tr ',' ' ' | xargs)
 
           for SQL_FILE in $NORMALIZED_LIST; do
             echo ""
             echo "======================================"
-            echo "Deploying SQL: $SQL_FILE"
+            echo " VALIDATING: $SQL_FILE"
             echo "======================================"
 
-            if [[ ! -f "$SQL_FILE" ]]; then
-              echo "::error::File not found: $SQL_FILE"
-              exit 1
-            fi
+            python bigquery/scripts/validate_schema.py \
+              --sql_file "$SQL_FILE" \
+              --project "$TARGET_PROJECT_ID" \
+              --dataset "$DATASET_ID"
 
-            # -----------------------------
-            # 1. SUBSTITUTE PROJECT + DATASET
-            # -----------------------------
-            TEMP_SQL=$(mktemp)
+            echo ""
+            echo "======================================"
+            echo " DEPLOYING: $SQL_FILE"
+            echo "======================================"
 
-            sed -e "s/{{PROJECT_ID}}/$TARGET_PROJECT_ID/g" \
-                -e "s/{{DATASET_ID}}/$DATASET_ID/g" \
-                "$SQL_FILE" > "$TEMP_SQL"
+            # Impersonate for THIS query only (correct way!)
+            gcloud config set auth/impersonate_service_account "$TARGET_SA_EMAIL"
 
-            echo "--- Running SQL with substitutions applied:"
-            cat "$TEMP_SQL"
+            bq --project_id="$TARGET_PROJECT_ID" \
+               --dataset_id="$DATASET_ID" \
+               query --use_legacy_sql=false \
+               < "$SQL_FILE"
 
-            # -----------------------------
-            # 2. EXECUTE USING bq query
-            # -----------------------------
-            bq query \
-              --use_legacy_sql=false \
-              --project_id="$TARGET_PROJECT_ID" \
-              < "$TEMP_SQL"
-
-            echo "✔ Successfully executed: $SQL_FILE"
+            echo "✔ SUCCESS: $SQL_FILE"
+            echo ""
           done
 
-          echo "🎉 All SQL files deployed successfully for env: $ENV"
+          echo "🎉 OPS SQL Deployment Complete for env: $DEPLOY_ENV"
