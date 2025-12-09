@@ -1,72 +1,103 @@
-# .github/workflows/deploy.yml
-
-name: GCP Keyless Deployment
+name: Multi-Env SQL Deployment
 
 on:
   push:
-    branches:
-      - main
+    branches: [ dev, main ]
     paths:
-      - 'bigquery/ops/**'
-      - '.github/workflows/ops_deploy_sql.yml'
-      
+      - "bigquery/ops/tables/**"
+      - ".github/workflows/ops_deploy_sql.yml"
+
 jobs:
-  deploy_bq_migration:
+  deploy:
     runs-on: ubuntu-latest
-    
-    # CRITICAL: Grants the job permission to fetch the OIDC token
+
+    # --------------------------
+    #  FILE LIST (GLOBAL)
+    # --------------------------
+    env:
+      FILE_LIST: >
+        bigquery/ops/tables/file_ingestion_audit.sql,
+        bigquery/ops/tables/standards_definition.sql
+
+
+    # --------------------------
+    # MATRIX CONFIG
+    # --------------------------
+    strategy:
+      matrix:
+        env: [dev, prod]
+        include:
+          - env: dev
+            PROJECT_ID: prj-clin-syn-np
+            TARGET_SA: project-service-account@prj-clin-syn-np.iam.gserviceaccount.com
+            DATASET_ID: synthea_bronze_dev
+
+          - env: prod
+            PROJECT_ID: prj-clin-syn-pd
+            TARGET_SA: project-service-account@prj-clin-syn-pd.iam.gserviceaccount.com
+            DATASET_ID: synthea_bronze
+
     permissions:
-      id-token: write 
-      contents: read 
+      id-token: write
+      contents: read
 
     steps:
       - uses: actions/checkout@v4
-      
-      # Step 1: Authenticate as the Central Jenkins SA
-      # This uses the secrets you just set up (GCP_SA_EMAIL & GCP_WIF_PROVIDER_ID)
-      - name: Authenticate to Google Cloud via WIF
-        uses: 'google-github-actions/auth@v2'
-        id: auth
+
+      # Authenticate via WIF
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
         with:
           workload_identity_provider: ${{ secrets.GCP_WIF_PROVIDER_ID }}
           service_account: ${{ secrets.GCP_SA_EMAIL }}
-      
-      # Step 2: Deploy BigQuery Schema Migration
-      # This step must be repeated for every project (e.g., prod, dev, etc.)
-      - name: Deploy to Shared NP Project
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+
+      - run: pip install sqlglot google-cloud-bigquery google-auth
+
+      # --------------------------
+      # DEPLOYMENT LOGIC
+      # --------------------------
+      - name: Validate + Deploy SQL
         env:
-          # Define the target credentials for this specific environment (Spoke Project)
-          TARGET_SA_EMAIL: project-service-account@prj-lbd-shared-np.iam.gserviceaccount.com
-          TARGET_PROJECT_ID: prj-lbd-shared-np
-
+          PROJECT_ID: ${{ matrix.PROJECT_ID }}
+          TARGET_SA: ${{ matrix.TARGET_SA }}
+          DATASET_ID: ${{ matrix.DATASET_ID }}
         run: |
-          echo "--- Starting Deployment to ${{ env.TARGET_PROJECT_ID }} ---"
-          
-          # 1. IMPERSONATE: Use the Jenkins SA (ambient identity) to fetch 
-          # the token for the TARGET_SA and set it as the default context.
-          gcloud config set auth/impersonate_service_account "${{ env.TARGET_SA_EMAIL }}"
+          echo "====== Deploying ENV: ${{ matrix.env }} ======"
+          echo "Project       : $PROJECT_ID"
+          echo "Target SA     : $TARGET_SA"
+          echo "Dataset       : $DATASET_ID"
+          echo "File List     : $FILE_LIST"
 
-          # --- DEPLOYMENT STEP A: SCHEMA DEFINITION ---
-          SCHEMA_FILE="bigquery/ops/tables/standards_definition.sql" 
-          echo "Running schema definition: ${SCHEMA_FILE}"
+          # Normalize comma-separated list into clean loopable items
+          NORMALIZED_LIST=$(echo "$FILE_LIST" \
+              | tr ',' ' ' \
+              | xargs)
 
-          # 2. EXECUTE: The 'bq query' command now automatically uses the 
-          # impersonated identity (the Target SA token). No '--token' needed.
-          bq query \
-             --use_legacy_sql=false \
-             --project_id="${{ env.TARGET_PROJECT_ID }}" \
-             < ${SCHEMA_FILE}
-          
-          echo "Schema definition complete."
+          # Loop through files
+          for SQL_FILE in $NORMALIZED_LIST; do
+            echo ""
+            echo "=== VALIDATING: $SQL_FILE ==="
 
-          # --- DEPLOYMENT STEP B: DATA INSERTION/SEEDS ---
-          DATA_FILE="bigquery/ops/seeds/bronze_v1_standards.sql"
-          echo "Running data insertion: ${DATA_FILE}"
+            TEMP_SQL=$(mktemp)
 
-          bq query \
-             --use_legacy_sql=false \
-             --project_id="${{ env.TARGET_PROJECT_ID }}" \
-             < ${DATA_FILE}
-          
-          echo "Data insertion complete. Deployment finished."
+            sed \
+              -e "s|\${PROJECT_ID}|$PROJECT_ID|g" \
+              -e "s|\${DATASET_ID}|$DATASET_ID|g" \
+              "$SQL_FILE" > "$TEMP_SQL"
 
+            # Now deploy the substituted SQL
+            bq query \
+              --use_legacy_sql=false \
+              --project_id="$PROJECT_ID" \
+              < "$TEMP_SQL"
+
+
+            echo "✔ Completed: $SQL_FILE"
+          done
+
+          echo "🎉 Deployment Complete for ${{ matrix.env }}"

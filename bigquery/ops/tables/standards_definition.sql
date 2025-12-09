@@ -1,4 +1,4 @@
-CREATE TABLE IF NOT EXISTS `ops_metadata.standards_definition` (
+CREATE TABLE IF NOT EXISTS `{{PROJECT_ID}}.{{DATASET_ID}}.standards_definition` (
     standard_id STRING,
     layer STRING,
     column_name STRING,
