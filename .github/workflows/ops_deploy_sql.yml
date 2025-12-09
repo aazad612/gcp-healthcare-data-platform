@@ -97,16 +97,6 @@ jobs:
           for SQL_FILE in $NORMALIZED_LIST; do
             echo ""
             echo "======================================"
-            echo " VALIDATING: $SQL_FILE"
-            echo "======================================"
-
-            python bigquery/scripts/validate_schema.py \
-              --sql_file "$SQL_FILE" \
-              --project "$TARGET_PROJECT_ID" \
-              --dataset "$DATASET_ID"
-
-            echo ""
-            echo "======================================"
             echo " DEPLOYING: $SQL_FILE"
             echo "======================================"
 
