@@ -100,13 +100,20 @@ jobs:
             echo " DEPLOYING: $SQL_FILE"
             echo "======================================"
 
+            TEMP_SQL=$(mktemp)
+
+            sed \
+              -e "s/{{PROJECT_ID}}/$TARGET_PROJECT_ID/g" \
+              -e "s/{{DATASET_ID}}/$DATASET_ID/g" \
+              "$SQL_FILE" > "$TEMP_SQL"
+
             # Impersonate for THIS query only (correct way!)
             gcloud config set auth/impersonate_service_account "$TARGET_SA_EMAIL"
 
             bq --project_id="$TARGET_PROJECT_ID" \
                --dataset_id="$DATASET_ID" \
                query --use_legacy_sql=false \
-               < "$SQL_FILE"
+               < "$TEMP_FILE"
 
             echo "✔ SUCCESS: $SQL_FILE"
             echo ""
