@@ -73,10 +73,10 @@ jobs:
       - name: Validate + Deploy SQL Files
         shell: bash
         env:
-          ENV              : ${{ steps.env_vars.outputs.env }}
-          TARGET PROJECT   : ${{ steps.env_vars.outputs.TARGET_PROJECT_ID }}
-          TARGET SA        : ${{ steps.env_vars.outputs.TARGET_SA_EMAIL }}
-          DATASET ID       : ${{ steps.env_vars.outputs.DATASET_ID }}
+          ENV               : ${{ steps.env_vars.outputs.env }}
+          TARGET_PROJECT_ID : ${{ steps.env_vars.outputs.TARGET_PROJECT_ID }}
+          TARGET_SA         : ${{ steps.env_vars.outputs.TARGET_SA_EMAIL }}
+          DATASET_ID        : ${{ steps.env_vars.outputs.DATASET_ID }}
         run: |
           # Normalize CSV list → space-separated list
           NORMALIZED_LIST=$(echo "$FILE_LIST" | tr ',' ' ' | xargs)
