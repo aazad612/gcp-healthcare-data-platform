@@ -13,7 +13,7 @@ from google.cloud import bigquery
 # ----------------------------------------
 CONFIG_BUCKET = os.environ.get("CONFIG_BUCKET", "bkt-clin-syn-configs-np")
 AUDIT_TABLE = os.environ.get("AUDIT_TABLE", "prj-lbd-shared-np.ops_metadata.file_ingestion_audit")
-CONTRACTS_PREFIX = "bronze/contracts/"
+CONTRACTS_PREFIX = "contracts/"
 
 storage_client = storage.Client()
 bq_client = bigquery.Client()
