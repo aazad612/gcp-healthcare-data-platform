@@ -5,12 +5,14 @@ CREATE TABLE IF NOT EXISTS `{{PROJECT_ID}}.{{DATASET_ID}}.file_ingestion_audit`
     bucket STRING NOT NULL,
     object_path STRING NOT NULL,                   -- full GCS path
     file_name STRING NOT NULL,                     -- just the filename
-    entity STRING NOT NULL,                        -- conditions / encounters / patients
+    domain STRING NOT NULL,                        -- clinical/enterprise/research
     system_name STRING NOT NULL,                   -- synthea, epic, cerner, etc.
 
     -- Dates
-    arrival_date DATE NOT NULL,                    -- folder-based arrival date
-    event_date DATE,                               -- date parsed from filename
+    file_arrival_time TIMESTAMP NOT NULL,          -- folder-based arrival date
+    ingestion_started TIMESTAMP NOT NULL,          -- When Cloud Function inserted this row
+    ingestion_completed TIMESTAMP,                 -- Updated by Dataflow when done
+    file_date DATE,                                -- YYYYMMDD extracted from filename
 
     -- File Metadata
     file_size_bytes INT64,
@@ -24,11 +26,12 @@ CREATE TABLE IF NOT EXISTS `{{PROJECT_ID}}.{{DATASET_ID}}.file_ingestion_audit`
     routed_to STRING,                              -- incoming | validated | rejected
     routed_path STRING,                            -- GCS final location
 
-    -- Pub/Sub → DF Metadata
+    -- Orchestration Metadata
     pubsub_message_id STRING,
+    dataflow_job_id STRING,                        -- ID of the job that processes this file
 
     -- Standard metadata
     meta_ingest_timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP()
 )
 PARTITION BY DATE(meta_ingest_timestamp)
-CLUSTER BY entity, system_name;
+CLUSTER BY domain, system_name;                  

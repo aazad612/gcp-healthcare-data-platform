@@ -1,7 +1,5 @@
 import json
 import apache_beam as beam
-from apache_beam.options.pipeline_options import PipelineOptions, StandardOptions
-
 
 class ParsePubSubMessage(beam.DoFn):
     def process(self, element):
@@ -31,10 +29,13 @@ class CountLines(beam.DoFn):
 
 
 def run():
-    from apache_beam.options.pipeline_options import PipelineOptions, SetupOptions
+    from apache_beam.options.pipeline_options import PipelineOptions, SetupOptions, StandardOptions
 
     pipeline_options = PipelineOptions()
+
+    # “Serialize everything I defined in my main Python file and send it to workers.”
     pipeline_options.view_as(SetupOptions).save_main_session = True
+    pipeline_options.view_as(StandardOptions).streaming = True
 
     class CustomOptions(PipelineOptions):
         @classmethod
@@ -46,19 +47,13 @@ def run():
             )
 
     opts = pipeline_options.view_as(CustomOptions)
-    standard = pipeline_options.view_as(StandardOptions)
-    standard.streaming = True
-
-    p = beam.Pipeline(options=pipeline_options)
-
-    (
-        p
-        | "ReadPubSub" >> beam.io.ReadFromPubSub(subscription=opts.input_subscription)
-        | "Decode" >> beam.Map(lambda x: x.decode("utf-8"))
-        | "ParseMessage" >> beam.ParDo(ParsePubSubMessage())
-        | "CountLines" >> beam.ParDo(CountLines())
-    )
-
-    result = p.run()
-    result.wait_until_finish()
+    
+    with beam.Pipeline(options=pipeline_options) as p:
+        (
+            p
+            | "ReadPubSub" >> beam.io.ReadFromPubSub(subscription=opts.input_subscription)
+            | "Decode" >> beam.Map(lambda x: x.decode("utf-8"))
+            | "ParseMessage" >> beam.ParDo(ParsePubSubMessage())
+            | "CountLines" >> beam.ParDo(CountLines())
+        )
 
