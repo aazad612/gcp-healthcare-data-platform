@@ -5,6 +5,7 @@ on:
     branches: [ dev, main ]
     paths:
       - "bigquery/ops/tables/**"
+      - "bigquery/ops/seeds/**"
       - ".github/workflows/ops_deploy_sql.yml"
 
 # ---------------------------------------------------------
@@ -12,8 +13,8 @@ on:
 # ---------------------------------------------------------
 env:
   FILE_LIST: >
-    bigquery/ops/tables/file_ingestion_audit.sql,
-    bigquery/ops/tables/standards_definition.sql
+    bigquery/ops/tables/file_ingestion_mapping.sql,
+    bigquery/ops/seeds/file_ingestion_mapping_encounters.sql
 
 jobs:
   deploy_ops_sql:
