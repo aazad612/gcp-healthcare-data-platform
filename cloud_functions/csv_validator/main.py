@@ -16,52 +16,87 @@ logger = logging.getLogger(__name__)
 
 
 class Config:
-    """Central Configuration loaded from Environment Variables"""
+    """
+    Central Config. 
+    Separates 'Data Project' (Spoke) from 'Shared Project' (Hub).
+    """
     def __init__(self):
-        self.PROJECT_ID = os.environ.get("PROJECT_ID")
+        # REQUIRED: Basic Context
+        self.ENV = os.environ.get("ENVIRONMENT", "np")  # dev, np, prod
+        self.DATA_PROJECT = os.environ.get("DATA_PROJECT_ID")   # e.g., project-clin-syn-np
+        self.SHARED_PROJECT = os.environ.get("SHARED_PROJECT_ID") # e.g., shared_np
+        
+        # REQUIRED: Resources (Constructed or Explicit)
         self.CONFIG_BUCKET = os.environ.get("CONFIG_BUCKET") 
-        self.AUDIT_TABLE = os.environ.get("AUDIT_TABLE")
-        self.ALERT_TOPIC = os.environ.get("ALERT_TOPIC") # e.g. projects/x/topics/alerts
+        self.AUDIT_TABLE_ID = os.environ.get("AUDIT_TABLE_ID") # Full ID: project.dataset.table
+        
+        # REQUIRED: Dataflow
+        self.DATAFLOW_TEMPLATE_GCS = os.environ.get("DATAFLOW_TEMPLATE_GCS")
+        self.DATAFLOW_TEMP_BUCKET = os.environ.get("DATAFLOW_TEMP_BUCKET") 
+        self.DATAFLOW_SA = os.environ.get("DATAFLOW_SERVICE_ACCOUNT")
         self.DATAFLOW_REGION = os.environ.get("DATAFLOW_REGION", "us-central1")
-        self.DATAFLOW_TEMPLATE = os.environ.get("DATAFLOW_TEMPLATE") # gs://...
-        self.TEMP_BUCKET = os.environ.get("TEMP_BUCKET") # gs://...
-        self.SERVICE_ACCOUNT = os.environ.get("SERVICE_ACCOUNT_EMAIL") # dataflow-sa@...
+        
+        # OPTIONAL: Alerting
+        self.ALERT_TOPIC_ID = os.environ.get("ALERT_TOPIC_ID") # Full ID
 
+        # Validation
+        if not all([self.DATA_PROJECT, self.SHARED_PROJECT, self.CONFIG_BUCKET, self.AUDIT_TABLE_ID]):
+            raise ValueError("CRITICAL: Missing required environment variables.")
         # Validation: Fail fast if config is missing
         if not all([self.PROJECT_ID, self.CONFIG_BUCKET, self.AUDIT_TABLE]):
             raise ValueError("Critical Environment Variables are missing.")
         
-class bq_audit_logger:
-    """Handles all interactions with BigQuery Audit Logs"""
-    def __init__(self, client: bigquery.Client, table_id: str):
-        self.client = client
-        self.table_id = table_id
+class BQAuditLogger:
+    """
+    Handles logging to BigQuery. 
+    Renamed methods/vars to avoid collision with data ingestion logic.
+    """
+    def __init__(self, bq_client: bigquery.Client, table_id: str):
+        self.client = bq_client
+        self.audit_table = table_id
 
-    def bq_log(self, meta: dict, status: str, errors: list = None):
+    def write_audit_entry(self, meta: dict, status: str, errors: list = None, job_id: str = None):
         """
-        meta: dict with keys {bucket, object_path, filename, system, entity, file_date}
+        Inserts a single row into the Audit Table.
         """
         row = {
-            "ingestion_id": str(uuid.uuid4()),
+            "ingestion_id": meta.get("ingestion_id"),
             "bucket": meta.get("bucket"),
             "object_path": meta.get("object_path"),
-            "file_name": meta.get("filename"),
-            "entity": meta.get("entity"),
-            "system_name": meta.get("system"),
-            "arrival_date": meta.get("file_date", datetime.utcnow().date().isoformat()),
+            "file_name": meta.get("file_name"),
+            
+            "domain": meta.get("domain", "UNKNOWN"),
+            "system_name": meta.get("system_name", "UNKNOWN"),
+
+            "file_size_bytes": meta.get("file_size_bytes"),
+            "file_type": meta.get("file_type"),
+            
+            # Dates
+            "file_arrival_time": meta.get("arrival_ts"), # GCS creation time
+            "ingestion_started": datetime.utcnow().isoformat(),
+            "file_date": meta.get("file_date"), # YYYY-MM-DD
+            
+            # Status
             "validation_status": status,
             "validation_errors": errors or [],
-            "meta_ingest_timestamp": datetime.utcnow().isoformat()
+            "dataflow_job_id": job_id,
+            
+            # Routing (Default to incoming for now)
+            "routed_to": "incoming",
+            "routed_path": f"gs://{meta.get('bucket')}/{meta.get('object_path')}"
         }
         
         try:
-            insert_errors = self.client.insert_rows_json(self.table_id, [row])
+            # We use ignore_unknown_values=True to be safe against schema updates
+            insert_errors = self.client.insert_rows_json(
+                self.audit_table, [row], ignore_unknown_values=True
+            )
             if insert_errors:
-                logger.error(f"BQ Audit Insert Failed: {insert_errors}")
+                logger.error(f"AUDIT INSERT FAILED: {insert_errors}")
             else:
-                logger.info(f"Audit record ({status}) saved.")
+                logger.info(f"Audit record saved: {status}")
         except Exception as e:
-            logger.error(f"Critical Audit Failure: {e}")
+            logger.error(f"CRITICAL AUDIT EXCEPTION: {e}")
 
 class IngestionManager:
     """Core Logic for Validation and Orchestration"""
