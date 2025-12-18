@@ -4,6 +4,8 @@ INSERT INTO `{{PROJECT_ID}}.{{DATASET_ID}}.file_ingestion_mapping` (
     filename_pattern, 
     archive_path, 
     protected,
+    file_type, 
+    delimiter,
 
     -- 2. Business Metadata
     domain, 
@@ -36,9 +38,11 @@ INSERT INTO `{{PROJECT_ID}}.{{DATASET_ID}}.file_ingestion_mapping` (
 VALUES (
     -- Matching
     'bkt-clin-syn-lake-dev-prj-clin-syn-np', 
-    'incoming/<domain>/<receipt_date:yyyy-mm-dd>/<system_name>/<table_name>_<system_name>-<file_date:yyyy-mm-dd>.csv', 
-    'archive/<domain>/<archive_date:yyyy-mm-dd>/<system_name>/<table_name>_<system_name>-<file_date:yyyy-mm-dd>.csv', 
+    'incoming/<domain>/<yyyymmdd>/<system_name>/<table_name>-<yyyy-mm-dd>.csv', 
+    'archive/<domain>/<yyyymmdd>/<system_name>/<table_name>-<yyyy-mm-dd>.csv', 
     TRUE,
+    'csv',
+    ',',
 
     -- Metadata
     'clinical', 

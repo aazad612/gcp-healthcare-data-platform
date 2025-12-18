@@ -1,10 +1,13 @@
-CREATE TABLE IF NOT EXISTS `{{PROJECT_ID}}.{{DATASET_ID}}.file_ingestion_mapping`
+-- CREATE TABLE IF NOT EXISTS `{{PROJECT_ID}}.{{DATASET_ID}}.file_ingestion_mapping`
+CREATE OR REPLACE TABLE  `{{PROJECT_ID}}.{{DATASET_ID}}.file_ingestion_mapping`
 (
     -- 1. Matching Logic (The "Key")
     bucket_name STRING NOT NULL,
     filename_pattern STRING NOT NULL,
     archive_path STRING, 
     protected BOOLEAN, 
+    file_type STRING NOT NULL, 
+    delimiter STRING, 
 
     -- 2. Business Metadata
     domain STRING NOT NULL,

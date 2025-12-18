@@ -10,8 +10,8 @@ gcloud functions deploy ingest-validator-dev \
   --set-env-vars=AUDIT_TABLE=prj-lbd-shared-np.ops_metadata.file_ingestion_audit
 
 
-gs://bkt-clin-syn-lake-dev-prj-clin-syn-np/incoming/synthea/2025-01-05/synthea/conditions_synthea-20250101.csv
-
+gsutil cp gs://bkt-clin-syn-lake-dev-prj-clin-syn-np/incoming/synthea/2025-01-05/synthea/conditions_synthea-20250101.csv \
+gs://bkt-clin-syn-lake-dev-prj-clin-syn-np/incoming/clinical/20251214/synthea/encounters-2025-01-01.csv
 
 gcloud functions logs read ingest-validator-dev --limit=50
 

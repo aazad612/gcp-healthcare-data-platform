@@ -47,13 +47,17 @@ def run():
             )
 
     opts = pipeline_options.view_as(CustomOptions)
-    
-    with beam.Pipeline(options=pipeline_options) as p:
-        (
-            p
-            | "ReadPubSub" >> beam.io.ReadFromPubSub(subscription=opts.input_subscription)
-            | "Decode" >> beam.Map(lambda x: x.decode("utf-8"))
-            | "ParseMessage" >> beam.ParDo(ParsePubSubMessage())
-            | "CountLines" >> beam.ParDo(CountLines())
-        )
+
+    p = beam.Pipeline(options=pipeline_options)
+
+    (
+        p
+        | "ReadPubSub" >> beam.io.ReadFromPubSub(subscription=opts.input_subscription)
+        | "Decode" >> beam.Map(lambda x: x.decode("utf-8"))
+        | "ParseMessage" >> beam.ParDo(ParsePubSubMessage())
+        | "CountLines" >> beam.ParDo(CountLines())
+    )
+
+    result = p.run()
+
 
