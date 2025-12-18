@@ -170,24 +170,24 @@ def call_dataflow(ctx):
     config = ctx.bq_config
     job_name = f"ingest-{ctx.table_name}-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
     
-    # service = build('dataflow', 'v1b3', cache_discovery=False)
+    service = build('dataflow', 'v1b3', cache_discovery=False)
     
-    # body = {
-    #     "jobName": job_name,
-    #     "gcsPath": config.dataflow_template_gcs,
-    #     "parameters": {
-    #         "config_file": config.runtime_config_json,
-    #         "input_file": f"gs://{ctx.bucket}/{ctx.file_path}"
-    #     },
-    #     "environment": {
-    #         "tempLocation": f"gs://{os.environ.get('TEMP_BUCKET')}/temp",
-    #         "zone": "us-east1-b"
-    #     }
-    # }
+    body = {
+        "jobName": job_name,
+        "gcsPath": config.dataflow_template_gcs,
+        "parameters": {
+            "config_file": config.runtime_config_json,
+            "input_file": f"gs://{ctx.bucket}/{ctx.file_path}"
+        },
+        "environment": {
+            "tempLocation": f"gs://{os.environ.get('TEMP_BUCKET')}/temp",
+            "zone": "us-east1-b"
+        }
+    }
     
-    # req = service.projects().templates().launch(
-    #     projectId=os.environ['OPS_PROJECT'],
-    #     body=body
-    # )
-    # req.execute()
+    req = service.projects().templates().launch(
+        projectId=os.environ['OPS_PROJECT'],
+        body=body
+    )
+    req.execute()
     logger.info(f"Dataflow Launched: {job_name}")
