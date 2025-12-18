@@ -119,9 +119,6 @@ def file_validity_prechecks(ctx):
     return True
 
 
-
-
-
 def _convert_pattern_to_regex(db_pattern):
     # (Reuse the robust split logic we wrote earlier)
     parts = re.split(r'(<[^>]+>)', db_pattern)
@@ -135,19 +132,9 @@ def _convert_pattern_to_regex(db_pattern):
             regex_parts.append(re.escape(part))
     return f"^{''.join(regex_parts)}$"
 
-# ---------------------------------------------------------
-# STEP 3: SCHEMA DRIFT CHECKS
-# ---------------------------------------------------------
-def schema_drift_checks(ctx):
-    """
-    Reads the first line of the CSV (Header).
-    Compares against expected schema in BigQuery or Config.
-    """
-    logger.info("Schema Drift Check: PASSED (Placeholder)")
-    return True
 
 # ---------------------------------------------------------
-# STEP 4: AUDIT ENTRY
+# AUDIT ENTRY
 # ---------------------------------------------------------
 def make_audit_entry(ctx):
     """

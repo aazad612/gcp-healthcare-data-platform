@@ -11,7 +11,11 @@ from csv_validator import csv_content_validation, csv_schema_drift_checks
 
 import functions_framework
 
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(name)s:%(funcName)s → %(message)s"
+)
+
 logger = logging.getLogger(__name__)
 
 @functions_framework.cloud_event
