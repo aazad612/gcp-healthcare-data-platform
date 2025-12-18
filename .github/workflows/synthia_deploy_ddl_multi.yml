@@ -14,7 +14,8 @@ on:
     #   - '**'
 
 jobs:
-  deploy_ddl_multi:
+  deploy_syn_ddl_multi:
+    if: false
     runs-on: ubuntu-latest
 
     # 🔥 YOU CONTROL WHICH FILES ARE DEPLOYED HERE

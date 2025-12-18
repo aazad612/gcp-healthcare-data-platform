@@ -1,9 +1,9 @@
-CREATE TABLE IF NOT EXISTS conditions (
-    id STRING,
+CREATE OR REPLACE TABLE conditions (
     start STRING,
     stop STRING,
     patient STRING,
     encounter STRING,
+    system STRING,
     code STRING,
     description STRING,
 

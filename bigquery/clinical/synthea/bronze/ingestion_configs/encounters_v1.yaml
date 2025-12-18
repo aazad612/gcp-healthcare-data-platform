@@ -1,0 +1,35 @@
+job_name: encounters-stream-bronze
+runner: DataflowRunner
+region: us-central1
+project: prj-lbd-shared-np
+
+autoscaling_algorithm: THROUGHPUT_BASED
+max_workers: 5
+num_workers: 1
+worker_machine_type: e2-small
+
+sdk_container_image: "apache/beam_python3.10_sdk:2.57.0"
+
+temp_location: gs://bkt-df-temp-np-prj-lbd-shared-np/temp
+staging_location: gs://bkt-df-temp-np-prj-lbd-shared-np/staging
+
+# Pub/Sub ingestion topic
+input_subscription: "projects/prj-lbd-shared-np/subscriptions/df-ingest-sub-np"
+
+# Bronze output table
+output_table: "prj-clin-syn-np.bronze.encounters"
+
+# Contract + validation configs
+schema_contract_path: "gs://bkt-clin-syn-configs-np/contracts/encounters_v1.json"
+insert_metadata: true
+detect_schema_drift: true
+
+# Performance
+save_main_session: true
+streaming: true
+
+labels:
+  domain: clin_syn
+  table: encounters
+  layer: bronze
+  env: np

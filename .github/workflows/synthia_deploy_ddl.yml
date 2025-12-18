@@ -12,16 +12,17 @@ on:
       - main 
     paths:
       # Trigger only when the specific files change
-      - 'bigquery/clinical/synthea/bronze/tabls/patients.sql' 
+      - 'bigquery/clinical/synthea/bronze/tables/conditions.sql' 
       # - 'bigquery/scripts/validate_schema.py'
       # - '.github/workflows/synthia_deploy_ddl.yml'
 
 jobs:
-  determine_and_deploy:
+  deploy_syn_ddl:
+    if: true
     runs-on: ubuntu-latest
 
     env:
-      SQL_FILE_PATH: bigquery/clinical/synthea/bronze/tables/patients.sql
+      SQL_FILE_PATH: bigquery/clinical/synthea/bronze/tables/conditions.sql
     
     permissions:
       id-token: write 
