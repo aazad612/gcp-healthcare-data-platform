@@ -6,6 +6,7 @@ INSERT INTO `{{PROJECT_ID}}.{{DATASET_ID}}.file_ingestion_mapping` (
     protected,
     file_type, 
     delimiter,
+    validation_row_count,
 
     -- 2. Business Metadata
     domain, 
@@ -43,6 +44,7 @@ VALUES (
     TRUE,
     'csv',
     ',',
+    10,
 
     -- Metadata
     'clinical', 
@@ -50,8 +52,8 @@ VALUES (
     'encounter',
 
     -- 3. Execution Configs
-    'gs://bkt-clin-syn-configs-np/<domain>/<system_name>/bronze/contracts/<table_name>.json',
-    'gs://bkt-clin-syn-configs-np/<domain>/<system_name>/bronze/ingestion_configs/<table_name>.yaml',
+    'gs://bkt-clin-syn-configs-np/clinical/synthea/bronze/contracts/encounters_v1.json',
+    'gs://bkt-clin-syn-configs-np/clinical/synthea/bronze/ingestion_configs/encounters_v1.yaml',
 
     -- 4. Destination 
     'cli_syn_np', 
@@ -59,7 +61,7 @@ VALUES (
     'encounters',
 
     -- 5. Dataflow 
-    'gs://bkt-clin-syn-configs-np/<domain>/<system_name>/bronze/dataflow/<table_name>.json', 
+    'gs://bkt-clin-syn-configs-np/clinical/synthea/bronze/dataflow/encounters_v1.json', 
     'sa-dataflow-runner@cli_syn_np.iam.gserviceaccount.com',
 
     -- 6. Airflow (Unused)

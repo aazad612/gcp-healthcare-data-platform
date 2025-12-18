@@ -114,58 +114,12 @@ def file_validity_prechecks(ctx):
     ctx.delimiter = config.delimiter
     if config.file_type != detected_extension:
         ctx.add_error ('format expected is {config.file_type} found {detected_extension} instead ')
+
+    ctx.contract_gcs_path = config.contract_gcs_path
     return True
 
 
-def csv_content_validation(ctx):
-    """
-    If file_size is under 1mb check contents 
-    """
-    from google.cloud import storage
-    import pandas as pd
-    from pandas.errors import ParserError
 
-    storage_client = storage.Client()
-    bucket = storage_client.bucket(ctx.bucket)
-    blob = bucket.blob(ctx.file_path)
-
-    try: 
-        with blob.open("r") as f:
-            
-            df = pd.read_csv(f, sep=ctx.delimiter, nrows=ctx.row_limit)
-
-            # Check delimiter 
-            if df.shape[1] <= 1:
-                ctx.add_error(f"Suspicious Geometry: Found {df.shape[1]} columns. Possible delimiter mismatch.")
-
-            # Check Header for missing columns
-            header = df.columns.tolist()
-            unnamed_cols = [c for c in header if str(c).startswith("Unnamed:")]
-
-            if len(unnamed_cols) > 0:
-                ctx.add_error(f"Garbage Header: Found {len(unnamed_cols)} 'Unnamed' columns.")
-            else:
-                ctx.extracted_headers = header
-
-            # Check for "Replacement Characters" (The  symbol)
-            if df.astype(str).apply(lambda x: x.str.contains('\ufffd')).any().any():
-                ctx.add_error("Encoding Error: Found Unicode replacement characters ().")
-
-            # CHECK BINARY/NULL BYTES
-            if df.astype(str).apply(lambda x: x.str.contains('\x00')).any().any():
-                ctx.add_error("Binary Data Detected: Found null bytes in text.")
-
-    except ParserError as e:
-            # This catches "Expected 1 fields in line 3, saw 3"
-        ctx.add_error (f"STRUCTURAL FAILURE: CSV Parsing Error - {str(e)}")
-            
-    except UnicodeDecodeError as e:
-        # This catches binary files or bad encoding
-        ctx.add_error (f"ENCODING FAILURE: File is not valid text - {str(e)}")
-        
-    except Exception as e:
-        # Catch-all for other issues (permissions, etc.)
-        ctx.add_error (f"READ FAILURE: {str(e)}")
 
 
 def _convert_pattern_to_regex(db_pattern):

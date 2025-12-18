@@ -3,11 +3,12 @@ from context import IngestionContext
 from steps import (
     only_process_data_files,
     file_validity_prechecks,
-    csv_content_validation,
-    schema_drift_checks,
     make_audit_entry,
     call_dataflow
 )
+
+from csv_validator import csv_content_validation, csv_schema_drift_checks
+
 import functions_framework
 
 logging.basicConfig(level=logging.INFO)
@@ -40,7 +41,7 @@ def trigger_ingestion(cloud_event):
             make_audit_entry(ctx) # Log failure
             return "STOPPED_VALIDATION"
 
-        if not schema_drift_checks(ctx):
+        if not csv_schema_drift_checks(ctx):
             make_audit_entry(ctx) # Log failure
             return "STOPPED_SCHEMA"
 
@@ -69,7 +70,7 @@ if __name__ == "__main__":
     # ---------------------------------------------------------
     print("\n⚡️ SETTING UP LOCAL TEST ENVIRONMENT...")
     os.environ['OPS_PROJECT'] = 'prj-lbd-shared-np'  # <--- Verify your project ID
-    os.environ['TEMP_BUCKET'] = ''
+    os.environ['CONFIG_BUCKET'] = ''
 
     # ---------------------------------------------------------
     # 2. MOCKING (Prevents real API calls / costs)

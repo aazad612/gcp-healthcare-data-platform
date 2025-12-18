@@ -7,7 +7,8 @@ CREATE OR REPLACE TABLE  `{{PROJECT_ID}}.{{DATASET_ID}}.file_ingestion_mapping`
     archive_path STRING, 
     protected BOOLEAN, 
     file_type STRING NOT NULL, 
-    delimiter STRING, 
+    delimiter STRING,
+    validation_row_count INT DEFAULT 10,
 
     -- 2. Business Metadata
     domain STRING NOT NULL,
