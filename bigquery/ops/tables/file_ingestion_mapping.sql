@@ -47,9 +47,7 @@ CREATE OR REPLACE TABLE  `{{PROJECT_ID}}.{{DATASET_ID}}.file_ingestion_mapping`
     -- 8. Audit
     is_active BOOLEAN DEFAULT TRUE,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP(),
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP(),
-
-    CONSTRAINT chk_env CHECK (env IN ('dev', 'qa', 'uat', 'prod'))
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP()
 );
 
 
