@@ -15,7 +15,7 @@ on:
       # - 'bigquery/clinical/synthea/bronze/tables/conditions.sql'
       - bigquery/clinical/synthea/bronze/seeds/file_ingestion_mapping_conditions.sql
       # - 'bigquery/scripts/validate_schema.py'
-      # - '.github/workflows/synthia_deploy_ddl.yml'
+      - '.github/workflows/synthia_deploy_ddl.yml'
 
 jobs:
   deploy_syn_ddl:
