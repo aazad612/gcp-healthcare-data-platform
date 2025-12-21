@@ -62,7 +62,14 @@ jobs:
             echo "::error::Branch '$BRANCH' is not mapped to a deploy environment."
             exit 1
           fi
-
+      
+      - name: Debug Identity
+        run: |
+          echo "Checking active account:"
+          gcloud auth list
+          echo "Checking project configuration:"
+          gcloud config list
+          
       # -----------------------------------------------------
       # PYTHON FOR SQL VALIDATOR
       # -----------------------------------------------------
