@@ -77,7 +77,7 @@ VALUES (
 
     -- 6. Dataflow 
     'clinical/synthea/bronze/dataflow/conditions_v1.json',
-    'gcs,bq'
+    'gcs,bq',
 
     -- 7. Airflow
     NULL, NULL, NULL, NULL,
