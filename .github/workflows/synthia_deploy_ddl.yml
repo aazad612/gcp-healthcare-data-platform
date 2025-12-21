@@ -4,7 +4,11 @@ name: 🏥 Synthea Clinical Data Deployment
 
 on:
   push:
-    branches: [ dev, test, qa, main ]
+    branches:
+      - dev
+      - test
+      - qa
+      - main 
     paths:
       - 'bigquery/clinical/synthea/bronze/tables/**'
       - 'bigquery/clinical/synthea/bronze/seeds/**'
@@ -12,11 +16,12 @@ on:
 
 jobs:
   deploy_syn_ddl:
+    if: false
     runs-on: ubuntu-latest
 
     env:
       FILE_LIST: >
-        bigquery/clinical/synthea/bronze/seeds/file_ingestion_mapping_conditions.sql
+        bigquery/clinical/synthea/bronze/tables/conditions.sql
     
     permissions:
       id-token: write 
@@ -25,30 +30,47 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # --- STEP 1: Environment Variables ---
+      # --- STEP 1: Determine Target Environment and Set Variables ---
       - name: Determine Target Environment Variables
         id: set_vars
         run: |
           BRANCH_NAME="${{ github.ref_name }}"
+          
           case "$BRANCH_NAME" in
-            dev)  PROJECT_ID="prj-clin-syn-np";    DATASET_ID="synthea_bronze_dev" ;;
-            test) PROJECT_ID="prj-clin-syn-np-test"; DATASET_ID="synthea_bronze_test" ;;
-            qa)   PROJECT_ID="prj-clin-syn-np-qa";   DATASET_ID="synthea_bronze_qa" ;;
-            main) PROJECT_ID="prj-clin-syn-pd";    DATASET_ID="synthea_bronze" ;;
-            *) echo "::error::Branch $BRANCH_NAME not mapped."; exit 1 ;;
+            dev)
+              PROJECT_ID="prj-clin-syn-np"
+              DATASET_ID="synthea_bronze_dev"
+              ;;
+            test)
+              PROJECT_ID="prj-clin-syn-np-test"
+              DATASET_ID="synthea_bronze_test"
+              ;;
+            qa)
+              PROJECT_ID="prj-clin-syn-np-qa"
+              DATASET_ID="synthea_bronze_qa"
+              ;;
+            main)
+              PROJECT_ID="prj-clin-syn-pd"
+              DATASET_ID="synthea_bronze"
+              ;;
+            *)
+              echo "::error::Branch $BRANCH_NAME is not mapped to an environment."
+              exit 1
+              ;;
           esac
+          
           echo "PROJECT_ID=$PROJECT_ID" >> $GITHUB_OUTPUT
           echo "DATASET_ID=$DATASET_ID" >> $GITHUB_OUTPUT
           
-      # --- STEP 2: Authenticate ---
-      - name: Authenticate via WIF
+      # --- STEP 2: Authenticate (WIF Login as Jenkins SA) ---
+      - name: Authenticate to Google Cloud via WIF
         uses: 'google-github-actions/auth@v2'
         with:
           workload_identity_provider: ${{ secrets.GCP_WIF_PROVIDER_ID }}
           service_account: ${{ secrets.GCP_SA_EMAIL }}
 
-      # --- STEP 3: Setup Python ---
-      - name: Setup Python
+      # --- STEP 3: Validation Setup ---
+      - name: Setup Python and Install Tools
         uses: actions/setup-python@v4
         with:
           python-version: '3.x'
@@ -56,7 +78,7 @@ jobs:
       - name: Install SQL Parsing Libraries
         run: pip install sqlglot google-cloud-bigquery google-auth
 
-      # --- STEP 4: Run Validation (Tables Only) ---
+      # --- STEP 4: Run Validation (STRICTLY TABLES ONLY) ---
       - name: Run Schema Validation
         run: |
           for SQL_FILE in ${{ env.FILE_LIST }}; do
@@ -67,23 +89,27 @@ jobs:
                 --project "${{ steps.set_vars.outputs.PROJECT_ID }}" \
                 --dataset "${{ steps.set_vars.outputs.DATASET_ID }}"
             else
-              echo "⏩ Skipping validation for non-table script: $SQL_FILE"
+              echo "⏩ Skipping validation for seed/config: $SQL_FILE"
             fi
           done
 
       # --- STEP 5: Final Deployment ---
-      - name: Deploy SQL to BigQuery
+      - name: Deploy SQL to Dynamic Environment
         env:
           TARGET_PROJECT_ID: ${{ steps.set_vars.outputs.PROJECT_ID }}
           TARGET_DATASET_ID: ${{ steps.set_vars.outputs.DATASET_ID }}
           TARGET_SA_EMAIL: project-service-account@${{ steps.set_vars.outputs.PROJECT_ID }}.iam.gserviceaccount.com 
         run: |
+          echo "--- Starting Deployment to ${{ env.TARGET_PROJECT_ID }}/${{ env.TARGET_DATASET_ID }} ---"
+          
           gcloud config set auth/impersonate_service_account "${{ env.TARGET_SA_EMAIL }}"
 
           for SQL_FILE in ${{ env.FILE_LIST }}; do
-            echo "🚀 Deploying $SQL_FILE to ${{ env.TARGET_PROJECT_ID }}.${{ env.TARGET_DATASET_ID }}..."
+            echo "🚀 Deploying: $SQL_FILE"
             bq --project_id="${{ env.TARGET_PROJECT_ID }}" \
                --dataset_id="${{ env.TARGET_DATASET_ID }}" \
                query --use_legacy_sql=false \
                < "$SQL_FILE"
           done
+
+          echo "Deployment successful."
