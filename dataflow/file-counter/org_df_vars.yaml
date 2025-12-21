@@ -1,0 +1,249 @@
+version: "2.1"
+
+# ============================================================================
+# DOMAIN CONFIGURATION
+# Environments: dev, qa, uat, prod
+# ============================================================================
+
+domains:
+
+  # ----------------------------------------------------------------------------
+  # CLINICAL
+  # ----------------------------------------------------------------------------
+  clinical:
+    region: "us-central1"
+    use_public_ips: false
+
+    # SHARED INFRA (Hub)
+    # Rule: dev/qa/uat share the 'np' hub. prod uses 'pd'.
+    shared_infra:
+      project:
+        dev: "prj-lbd-shared-np"
+        qa:  "prj-lbd-shared-np"
+        uat: "prj-lbd-shared-np"
+        prod: "prj-lbd-shared-pd"
+      
+      dataflow_sa:
+        dev: "df-runner-np@prj-lbd-shared-np.iam.gserviceaccount.com"
+        qa:  "df-runner-np@prj-lbd-shared-np.iam.gserviceaccount.com"
+        uat: "df-runner-np@prj-lbd-shared-np.iam.gserviceaccount.com"
+        prod: "df-runner-pd@prj-lbd-shared-pd.iam.gserviceaccount.com"
+      
+      temp_bucket:
+        dev: "bkt-df-temp-np-prj-lbd-shared-np"
+        qa:  "bkt-df-temp-np-prj-lbd-shared-np"
+        uat: "bkt-df-temp-np-prj-lbd-shared-np"
+        prod: "bkt-df-temp-pd-prj-lbd-shared-pd"
+      
+      staging_bucket:
+        dev: "bkt-df-staging-np-prj-lbd-shared-np"
+        qa:  "bkt-df-staging-np-prj-lbd-shared-np"
+        uat: "bkt-df-staging-np-prj-lbd-shared-np"
+        prod: "bkt-df-staging-pd-prj-lbd-shared-pd"
+
+      subnet:
+        dev: "https://www.googleapis.com/compute/v1/projects/prj-net-common-np-host/regions/us-central1/subnetworks/sb-hub-main-usc1"
+        qa:  "https://www.googleapis.com/compute/v1/projects/prj-net-common-np-host/regions/us-central1/subnetworks/sb-hub-main-usc1"
+        uat: "https://www.googleapis.com/compute/v1/projects/prj-net-common-np-host/regions/us-central1/subnetworks/sb-hub-main-usc1"
+        prod: "https://www.googleapis.com/compute/v1/projects/prj-net-common-pd-host/regions/us-central1/subnetworks/sb-hub-main-usc1"
+
+    # UNITS (Spokes)
+    # Rule: Specific projects for every environment
+    units:
+      synthea:
+        project:
+          dev: "prj-clin-syn-np"   # User specified: np = dev
+          qa:  "prj-clin-syn-qa"
+          uat: "prj-clin-syn-uat"
+          prod: "prj-clin-syn-pd"
+        
+        sa:
+          dev: "project-service-account@prj-clin-syn-np.iam.gserviceaccount.com"
+          qa:  "project-service-account@prj-clin-syn-qa.iam.gserviceaccount.com"
+          uat: "project-service-account@prj-clin-syn-uat.iam.gserviceaccount.com"
+          prod: "project-service-account@prj-clin-syn-pd.iam.gserviceaccount.com"
+        
+        dataset:
+          dev: "synthea_bronze_dev"
+          qa:  "synthea_bronze_qa"
+          uat: "synthea_bronze_uat"
+          prod: "synthea_bronze_prod"
+        
+        config_bucket:
+          dev: "bkt-clin-syn-configs-np"
+          qa:  "bkt-clin-syn-configs-qa"
+          uat: "bkt-clin-syn-configs-uat"
+          prod: "bkt-clin-syn-configs-pd"
+        
+        landing_bucket:
+          dev: "bkt-clin-syn-lake-dev-prj-clin-syn-np"
+          qa:  "bkt-clin-syn-lake-qa-prj-clin-syn-qa"
+          uat: "bkt-clin-syn-lake-uat-prj-clin-syn-uat"
+          prod: "bkt-clin-syn-lake-pd-prj-clin-syn-pd"
+
+      hospitals:
+        project:
+          dev: "prj-clin-hosp-np"
+          qa:  "prj-clin-hosp-qa"
+          uat: "prj-clin-hosp-uat"
+          prod: "prj-clin-hosp-pd"
+        
+        sa:
+          dev: "project-service-account@prj-clin-hosp-np.iam.gserviceaccount.com"
+          qa:  "project-service-account@prj-clin-hosp-qa.iam.gserviceaccount.com"
+          uat: "project-service-account@prj-clin-hosp-uat.iam.gserviceaccount.com"
+          prod: "project-service-account@prj-clin-hosp-pd.iam.gserviceaccount.com"
+        
+        dataset:
+          dev: "hospitals_bronze_dev"
+          qa:  "hospitals_bronze_qa"
+          uat: "hospitals_bronze_uat"
+          prod: "hospitals_bronze_prod"
+        
+        config_bucket:
+          dev: "bkt-clin-hosp-configs-np"
+          qa:  "bkt-clin-hosp-configs-qa"
+          uat: "bkt-clin-hosp-configs-uat"
+          prod: "bkt-clin-hosp-configs-pd"
+        
+        landing_bucket:
+          dev: "bkt-clin-hosp-lake-dev-prj-clin-hosp-np"
+          qa:  "bkt-clin-hosp-lake-qa-prj-clin-hosp-qa"
+          uat: "bkt-clin-hosp-lake-uat-prj-clin-hosp-uat"
+          prod: "bkt-clin-hosp-lake-pd-prj-clin-hosp-pd"
+
+  # ----------------------------------------------------------------------------
+  # RESEARCH
+  # ----------------------------------------------------------------------------
+  research:
+    region: "us-east4"
+    use_public_ips: false
+
+    shared_infra:
+      project:
+        dev: "prj-res-shared-np"
+        qa:  "prj-res-shared-np"
+        uat: "prj-res-shared-np"
+        prod: "prj-res-shared-pd"
+      
+      dataflow_sa:
+        dev: "df-runner-res-np@prj-res-shared-np.iam.gserviceaccount.com"
+        qa:  "df-runner-res-np@prj-res-shared-np.iam.gserviceaccount.com"
+        uat: "df-runner-res-np@prj-res-shared-np.iam.gserviceaccount.com"
+        prod: "df-runner-res-pd@prj-res-shared-pd.iam.gserviceaccount.com"
+      
+      temp_bucket:
+        dev: "bkt-df-temp-np-prj-res-shared-np"
+        qa:  "bkt-df-temp-np-prj-res-shared-np"
+        uat: "bkt-df-temp-np-prj-res-shared-np"
+        prod: "bkt-df-temp-pd-prj-res-shared-pd"
+
+      staging_bucket:
+        dev: "bkt-df-staging-np-prj-res-shared-np"
+        qa:  "bkt-df-staging-np-prj-res-shared-np"
+        uat: "bkt-df-staging-np-prj-res-shared-np"
+        prod: "bkt-df-staging-pd-prj-res-shared-pd"
+
+      subnet:
+        dev: "https://www.googleapis.com/compute/v1/projects/prj-net-common-np-host/regions/us-east4/subnetworks/sb-hub-research-use4"
+        qa:  "https://www.googleapis.com/compute/v1/projects/prj-net-common-np-host/regions/us-east4/subnetworks/sb-hub-research-use4"
+        uat: "https://www.googleapis.com/compute/v1/projects/prj-net-common-np-host/regions/us-east4/subnetworks/sb-hub-research-use4"
+        prod: "https://www.googleapis.com/compute/v1/projects/prj-net-common-pd-host/regions/us-east4/subnetworks/sb-hub-research-use4"
+
+    units:
+      cohorts:
+        project:
+          dev: "prj-res-cohort-np"
+          qa:  "prj-res-cohort-qa"
+          uat: "prj-res-cohort-uat"
+          prod: "prj-res-cohort-pd"
+        
+        sa:
+          dev: "project-service-account@prj-res-cohort-np.iam.gserviceaccount.com"
+          qa:  "project-service-account@prj-res-cohort-qa.iam.gserviceaccount.com"
+          uat: "project-service-account@prj-res-cohort-uat.iam.gserviceaccount.com"
+          prod: "project-service-account@prj-res-cohort-pd.iam.gserviceaccount.com"
+        
+        dataset:
+          dev: "cohort_bronze_dev"
+          qa:  "cohort_bronze_qa"
+          uat: "cohort_bronze_uat"
+          prod: "cohort_bronze_prod"
+        
+        config_bucket:
+          dev: "bkt-res-coh-configs-np"
+          qa:  "bkt-res-coh-configs-qa"
+          uat: "bkt-res-coh-configs-uat"
+          prod: "bkt-res-coh-configs-pd"
+        
+        landing_bucket:
+          dev: "bkt-res-coh-lake-dev-prj-res-cohort-np"
+          qa:  "bkt-res-coh-lake-qa-prj-res-cohort-qa"
+          uat: "bkt-res-coh-lake-uat-prj-res-cohort-uat"
+          prod: "bkt-res-coh-lake-pd-prj-res-cohort-pd"
+
+  # ----------------------------------------------------------------------------
+  # ENTERPRISE
+  # ----------------------------------------------------------------------------
+  enterprise:
+    region: "us-central1"
+    use_public_ips: false
+
+    shared_infra:
+      project:
+        dev: "prj-ent-shared-np"
+        qa:  "prj-ent-shared-np"
+        uat: "prj-ent-shared-np"
+        prod: "prj-ent-shared-pd"
+      
+      dataflow_sa:
+        dev: "df-runner-ent-np@prj-ent-shared-np.iam.gserviceaccount.com"
+        qa:  "df-runner-ent-np@prj-ent-shared-np.iam.gserviceaccount.com"
+        uat: "df-runner-ent-np@prj-ent-shared-np.iam.gserviceaccount.com"
+        prod: "df-runner-ent-pd@prj-ent-shared-pd.iam.gserviceaccount.com"
+      
+      temp_bucket:
+        dev: "bkt-df-temp-np-prj-ent-shared-np"
+        qa:  "bkt-df-temp-np-prj-ent-shared-np"
+        uat: "bkt-df-temp-np-prj-ent-shared-np"
+        prod: "bkt-df-temp-pd-prj-ent-shared-pd"
+
+      staging_bucket:
+        dev: "bkt-df-staging-np-prj-ent-shared-np"
+        qa:  "bkt-df-staging-np-prj-ent-shared-np"
+        uat: "bkt-df-staging-np-prj-ent-shared-np"
+        prod: "bkt-df-staging-pd-prj-ent-shared-pd"
+
+      subnet:
+        dev: "https://www.googleapis.com/compute/v1/projects/prj-net-common-np-host/regions/us-central1/subnetworks/sb-hub-enterprise-usc1"
+        qa:  "https://www.googleapis.com/compute/v1/projects/prj-net-common-np-host/regions/us-central1/subnetworks/sb-hub-enterprise-usc1"
+        uat: "https://www.googleapis.com/compute/v1/projects/prj-net-common-np-host/regions/us-central1/subnetworks/sb-hub-enterprise-usc1"
+        prod: "https://www.googleapis.com/compute/v1/projects/prj-net-common-pd-host/regions/us-central1/subnetworks/sb-hub-enterprise-usc1"
+
+    units:
+      something1:
+        project:
+          dev: "prj-ent-s1-np"
+          qa:  "prj-ent-s1-qa"
+          uat: "prj-ent-s1-uat"
+          prod: "prj-ent-s1-pd"
+        sa:
+          dev: "project-service-account@prj-ent-s1-np.iam.gserviceaccount.com"
+          qa:  "project-service-account@prj-ent-s1-qa.iam.gserviceaccount.com"
+          uat: "project-service-account@prj-ent-s1-uat.iam.gserviceaccount.com"
+          prod: "project-service-account@prj-ent-s1-pd.iam.gserviceaccount.com"
+        dataset:
+          dev: "s1_bronze_dev"
+          qa:  "s1_bronze_qa"
+          uat: "s1_bronze_uat"
+          prod: "s1_bronze_prod"
+        config_bucket:
+          dev: "bkt-ent-s1-configs-np"
+          qa:  "bkt-ent-s1-configs-qa"
+          uat: "bkt-ent-s1-configs-uat"
+          prod: "bkt-ent-s1-configs-pd"
+        landing_bucket:
+          dev: "bkt-ent-s1-lake-dev-prj-ent-s1-np"
+          qa:  "bkt-ent-s1-lake-qa-prj-ent-s1-qa"
+          uat: "bkt-ent-s1-lake-uat-prj-ent-s1-uat"
+          prod: "bkt-ent-s1-lake-pd-prj-ent-s1-pd"

@@ -1,0 +1,78 @@
+name: Multi-Env OPS Cloud Function Deployment
+
+on:
+  push:
+    branches: [ dev, main ]
+    paths:
+      - "bigquery/ops/cloud_functions/**"
+      - ".github/workflows/ops_deploy_cloud_functions.yml"
+
+# ---------------------------------------------------------
+# GLOBAL VARS: Add new functions here (folder names)
+# ---------------------------------------------------------
+env:
+  CF_LIST: "cf_json_contract_gen"
+  REGION: "us-central1"
+
+jobs:
+  deploy_ops_functions:
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Authenticate to Google Cloud (WIF)
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WIF_PROVIDER_ID }}
+          service_account: ${{ secrets.GCP_SA_EMAIL }}
+
+      - name: Set Deployment Environment Vars
+        id: set_vars
+        run: |
+          BRANCH="${{ github.ref_name }}"
+
+          if [[ "$BRANCH" == "dev" ]]; then
+            echo "TARGET_PROJECT_ID=prj-lbd-shared-np" >> $GITHUB_OUTPUT
+            echo "TRIGGER_BUCKET=bkt-clin-syn-configs-np" >> $GITHUB_OUTPUT
+            echo "DEPLOY_ENV=np" >> $GITHUB_OUTPUT
+          elif [[ "$BRANCH" == "main" ]]; then
+            echo "TARGET_PROJECT_ID=prj-lbd-shared-pd" >> $GITHUB_OUTPUT
+            echo "TRIGGER_BUCKET=bkt-clin-syn-configs-pd" >> $GITHUB_OUTPUT
+            echo "DEPLOY_ENV=pd" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Deploy Cloud Functions
+        env:
+          PROJECT_ID: ${{ steps.set_vars.outputs.TARGET_PROJECT_ID }}
+          TRIGGER_BUCKET: ${{ steps.set_vars.outputs.TRIGGER_BUCKET }}
+        run: |
+          echo "====================================================="
+          echo "🚀 Deploying OPS Functions to: $PROJECT_ID"
+          echo "Region: $REGION"
+          echo "====================================================="
+
+          for CF_DIR in $CF_LIST; do
+            echo "Processing: $CF_DIR"
+            
+            # Use the folder name as the function name (standardizing)
+            # Replaces underscores with dashes for GCP naming compliance
+            FUNCTION_NAME=$(echo "$CF_DIR" | tr '_' '-')
+
+            gcloud functions deploy "$FUNCTION_NAME" \
+              --gen2 \
+              --runtime=python312 \
+              --region="$REGION" \
+              --project="$PROJECT_ID" \
+              --entry-point=contract_processor_trigger \
+              --source="bigquery/ops/cloud_functions/$CF_DIR" \
+              --trigger-bucket="$TRIGGER_BUCKET" \
+              --set-env-vars SHARED_PROJECT="$PROJECT_ID" \
+              --quiet
+              
+            echo "✔ SUCCESS: $FUNCTION_NAME deployed."
+          done

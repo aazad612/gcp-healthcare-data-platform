@@ -21,7 +21,7 @@ CREATE OR REPLACE TABLE  `{{PROJECT_ID}}.{{DATASET_ID}}.file_ingestion_mapping`
     entity STRING NOT NULL,
     
     -- 3. Execution Config (Common)
-    gcs_config_bucket STRING NOT NULL 
+    gcs_config_bucket STRING NOT NULL, 
     gcs_json_contract STRING NOT NULL,
     gcs_yaml_ingestion_config STRING NOT NULL,
 
