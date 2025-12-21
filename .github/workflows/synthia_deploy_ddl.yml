@@ -12,7 +12,8 @@ on:
       - main 
     paths:
       # Trigger only when the specific files change
-      - 'bigquery/clinical/synthea/bronze/tables/conditions.sql' 
+      # - 'bigquery/clinical/synthea/bronze/tables/conditions.sql'
+      - bigquery/clinical/synthea/bronze/seeds/file_ingestion_mapping_conditions.sql
       # - 'bigquery/scripts/validate_schema.py'
       # - '.github/workflows/synthia_deploy_ddl.yml'
 
@@ -22,7 +23,7 @@ jobs:
     runs-on: ubuntu-latest
 
     env:
-      SQL_FILE_PATH: bigquery/clinical/synthea/bronze/tables/conditions.sql
+      SQL_FILE_PATH: bigquery/clinical/synthea/bronze/seeds/file_ingestion_mapping_conditions.sql
     
     permissions:
       id-token: write 
