@@ -44,7 +44,7 @@ def mapping_exists_in_bq(context):
         FROM `{context.shared_project}.ops_metadata.file_ingestion_mapping`
         WHERE domain = @domain
           AND system_name = @unit
-          AND target_table_name = @table
+          AND entity = @table
           AND env = 'dev'
     """
     job_config = bigquery.QueryJobConfig(
