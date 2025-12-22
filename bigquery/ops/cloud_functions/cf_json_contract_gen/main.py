@@ -83,8 +83,9 @@ def convert_and_upload_json(yaml_content, context):
         logger.info(f"✅ Contract deployed: {context.gcs_json_path}")
         return True
     except Exception as e:
-        logger.error(f"❌ Conversion failed: {str(e)}")
+        logger.error(f"❌ Conversion failed: {str(e)} pass")
         return False
+        
 
 @functions_framework.cloud_event
 def contract_processor_trigger(cloud_event):
