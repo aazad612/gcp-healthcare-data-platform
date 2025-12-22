@@ -81,7 +81,7 @@ jobs:
               --source="bigquery/ops/cloud_functions/$CF_DIR" \
               --trigger-bucket="$TRIGGER_BUCKET" \
               --set-env-vars SHARED_PROJECT="$PROJECT_ID" \
-              --quiet
+              --log-http
               
             echo "✔ SUCCESS: $FUNCTION_NAME deployed."
           done
