@@ -12,7 +12,7 @@ on:
 # ---------------------------------------------------------
 env:
   CF_LIST: "cf_json_contract_gen"
-  REGION: "us-central1"
+  REGION: "us"
 
 jobs:
   deploy_ops_functions:
