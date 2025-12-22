@@ -12,7 +12,7 @@ on:
 # ---------------------------------------------------------
 env:
   CF_LIST: "cf_json_contract_gen"
-  REGION: "us"
+  REGION: "us-central1"
 
 jobs:
   deploy_ops_functions:
@@ -68,6 +68,7 @@ jobs:
               --gen2 \
               --runtime=python312 \
               --region="$REGION" \
+              --trigger-location=us \
               --project="$PROJECT_ID" \
               --entry-point=contract_processor_trigger \
               --source="bigquery/ops/cloud_functions/$CF_DIR" \
