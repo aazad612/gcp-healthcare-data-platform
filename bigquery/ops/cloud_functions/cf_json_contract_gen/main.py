@@ -17,8 +17,9 @@ class MetadataContext:
         self.shared_project = shared_project
         self.gcs_json_path = gcs_json_path
 
+import re
+
 def is_valid_contract_upload(blob_name, context):
-    """Filters events. Returns False if file is irrelevant to stop execution quietly."""
     if not blob_name.lower().endswith(('.yaml', '.yml')):
         return False
 
@@ -26,13 +27,18 @@ def is_valid_contract_upload(blob_name, context):
     if len(path_parts) < 5:
         return False
 
-    # Path check: [domain]/[unit]/bronze/ingestion_configs/[table].yaml
+    # Path: [domain]/[unit]/bronze/ingestion_configs/[table_v1].yaml
     if path_parts[2] == 'bronze' and path_parts[3] == 'ingestion_configs':
         context.domain = path_parts[0]
         context.unit = path_parts[1]
-        context.table_name = path_parts[4].rsplit('.', 1)[0]
+        
+        # Strip extension and then strip version suffix (e.g., 'encounters_v1' -> 'encounters')
+        filename = path_parts[4].rsplit('.', 1)[0]
+        context.table_name = re.sub(r'_v\d+$', '', filename) 
+        
         return True
     return False
+
 
 def mapping_exists_in_bq(context):
     """Verifies SQL mapping. Raises ValueError on failure to ensure visibility."""
@@ -73,6 +79,7 @@ def mapping_exists_in_bq(context):
     context.gcs_json_path = results[0].gcs_json_contract
     return True
 
+ 
 def convert_and_upload_json(yaml_content, context):
     """Converts YAML to JSON. Re-raises exceptions to prevent silent failures."""
     try:
@@ -107,6 +114,7 @@ def convert_and_upload_json(yaml_content, context):
     except Exception as e:
         logger.error(f"CRITICAL CONVERSION ERROR for {context.table_name}: {str(e)}")
         raise # Re-raise to crash the function and trigger a Traceback in logs
+
 
 @functions_framework.cloud_event
 def contract_processor_trigger(cloud_event):
