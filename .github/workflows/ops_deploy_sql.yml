@@ -63,13 +63,7 @@ jobs:
             exit 1
           fi
       
-      - name: Debug Identity
-        run: |
-          echo "Checking active account:"
-          gcloud auth list
-          echo "Checking project configuration:"
-          gcloud config list
-          
+
       # -----------------------------------------------------
       # PYTHON FOR SQL VALIDATOR
       # -----------------------------------------------------
