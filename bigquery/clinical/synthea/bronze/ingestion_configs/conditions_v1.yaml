@@ -44,7 +44,7 @@ schema:
 
 # ==============================================================================
 # 2. DATA QUALITY EXPECTATIONS
-# Drivers for Great Expectations and Python Pre-checks.
+#  Drivers for Great Expectations and Python Pre-checks.
 # ==============================================================================
 quality:
   row_level_checks:
