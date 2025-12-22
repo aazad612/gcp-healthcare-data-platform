@@ -79,7 +79,7 @@ quality:
 
 # ==============================================================================
 # 3. STORAGE STRATEGY
-# Directives for BigQuery table creation.
+#  Directives for BigQuery table creation.
 # ==============================================================================
 storage:
   partition_by:

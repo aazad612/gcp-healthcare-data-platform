@@ -1,69 +1,63 @@
-name: 🚚 Sync Data Contracts to GCS
+name: 🚚 Sync Changed Data Contracts to GCS
 
 on:
   push:
     branches: [ dev, main ]
     paths:
       - 'bigquery/clinical/synthea/bronze/ingestion_configs/**'
-      - '.github/workflows/sync_contracts.yml'
 
 jobs:
   sync_contracts:
     runs-on: ubuntu-latest
-
     permissions:
       id-token: write
       contents: read
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2 # Required to compare the current commit with the previous one
 
-      # ---------------------------------------------------
-      # 1. Select TARGET PROJECT + TARGET BUCKET
-      # ---------------------------------------------------
-      - name: Determine Environment Bucket
+      - name: Determine Environment
         id: env_vars
         run: |
-          BRANCH="${GITHUB_REF_NAME}"
-
-          if [[ "$BRANCH" == "main" ]]; then
-            echo "TARGET_PROJECT=prj-lbd-shared-pd" >> $GITHUB_ENV
+          if [[ "${GITHUB_REF_NAME}" == "main" ]]; then
             echo "TARGET_BUCKET=bkt-clin-syn-configs-pd" >> $GITHUB_ENV
             echo "TARGET_SA=project-service-account@prj-lbd-shared-pd.iam.gserviceaccount.com" >> $GITHUB_ENV
           else
-            echo "TARGET_PROJECT=prj-lbd-shared-np" >> $GITHUB_ENV
             echo "TARGET_BUCKET=bkt-clin-syn-configs-np" >> $GITHUB_ENV
             echo "TARGET_SA=project-service-account@prj-lbd-shared-np.iam.gserviceaccount.com" >> $GITHUB_ENV
           fi
 
-      # ---------------------------------------------------
-      # 2. Authenticate via Workload Identity Federation
-      # ---------------------------------------------------
-      - name: Authenticate to Google Cloud via WIF
+      - name: Authenticate to Google Cloud
         uses: google-github-actions/auth@v2
         with:
           workload_identity_provider: ${{ secrets.GCP_WIF_PROVIDER_ID }}
           service_account: ${{ secrets.GCP_SA_EMAIL }}
 
-      # ---------------------------------------------------
-      # 3. Impersonate ENV-SPECIFIC project-service-account
-      # ---------------------------------------------------
-      - name: Impersonate Target Project SA
+      - name: Sync ONLY Changed Files
         run: |
           gcloud config set auth/impersonate_service_account "$TARGET_SA"
 
-      # ---------------------------------------------------
-      # 4. Sync ONLY changed ingestion configs to GCS
-      # ---------------------------------------------------
-      - name: Sync Ingestion Configs to GCS
-        run: |
-          echo "Syncing changed ingestion configs to bucket: gs://$TARGET_BUCKET/"
+          # 1. Identify files changed in this commit within the target path
+          # Filter: Added (A), Copied (C), Modified (M)
+          CHANGED_FILES=$(git diff --name-only --diff-filter=ACM HEAD~1 HEAD | grep 'bigquery/clinical/synthea/bronze/ingestion_configs/' || true)
 
-          if compgen -G "bigquery/clinical/synthea/bronze/ingestion_configs/*" > /dev/null; then
-            # 'gcloud storage rsync' only copies files where checksums or sizes differ.
-            gcloud storage rsync -r bigquery/clinical/synthea/bronze/ingestion_configs gs://$TARGET_BUCKET/clinical/synthea/bronze/ingestion_configs
-          else
-            echo "No ingestion configs found. Skipping."
+          if [ -z "$CHANGED_FILES" ]; then
+            echo "No relevant YAML changes detected. Exiting."
+            exit 0
           fi
 
-          echo "✅ Sync complete."
+          for FILE in $CHANGED_FILES; do
+            # 2. Extract path relative to the ingestion_configs directory
+            # Source: bigquery/clinical/synthea/bronze/ingestion_configs/conditions_v1.yaml
+            # Target: clinical/synthea/bronze/ingestion_configs/conditions_v1.yaml
+            RELATIVE_PATH=$(echo "$FILE" | sed 's|bigquery/||')
+            
+            echo "Uploading: $FILE → gs://$TARGET_BUCKET/$RELATIVE_PATH"
+            
+            # 3. Use cp instead of rsync to target the specific file
+            gcloud storage cp "$FILE" "gs://$TARGET_BUCKET/$RELATIVE_PATH"
+          done
+
+          echo "✅ Targeted sync complete."
