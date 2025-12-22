@@ -1,34 +1,91 @@
-job_name: patients-stream-bronze
-runner: DataflowRunner
-region: us-central1
-project: prj-lbd-shared-np
+version: "1.0"
+entity: "patients"
+description: "Demographic information for patients in the Synthea EMR."
 
-autoscaling_algorithm: THROUGHPUT_BASED
-max_workers: 5
-num_workers: 1
-worker_machine_type: e2-standard-2
+# ==============================================================================
+# 1. THE SCHEMA
+# Defines the structure, types, and primary keys for dbt/BigQuery.
+# ==============================================================================
+schema:
+  primary_key: ["Id"]
+  
+  columns:
+    - name: "Id"
+      type: "STRING"
+      mode: "REQUIRED"
+      description: "UUID of the patient."
 
-sdk_container_image: "apache/beam_python3.10_sdk:2.57.0"
+    - name: "BIRTHDATE"
+      type: "DATE"
+      mode: "REQUIRED"
+      format: "%Y-%m-%d"
+      description: "Date of birth of the patient."
 
-temp_location: gs://bkt-df-temp-np-prj-lbd-shared-np/temp
-staging_location: gs://bkt-df-temp-np-prj-lbd-shared-np/staging
+    - name: "DEATHDATE"
+      type: "DATE"
+      mode: "NULLABLE"
+      format: "%Y-%m-%d"
+      description: "Date of death (if applicable)."
 
-input_subscription: "projects/prj-lbd-shared-np/subscriptions/df-ingest-sub-np"
+    - name: "SSN"
+      type: "STRING"
+      mode: "NULLABLE"
+      description: "Social Security Number."
 
-output_table: "prj-clin-syn-np.bronze.patients"
+    - name: "FIRST"
+      type: "STRING"
+      mode: "REQUIRED"
+      description: "First name of the patient."
 
-schema_contract_path: "gs://bkt-clin-syn-configs-np/contracts/patients_v1.json"
-insert_metadata: true
-detect_schema_drift: true
-encoding: "UTF-8"
+    - name: "LAST"
+      type: "STRING"
+      mode: "REQUIRED"
+      description: "Last name of the patient."
 
-save_main_session: true
-streaming: true
+    - name: "GENDER"
+      type: "STRING"
+      mode: "REQUIRED"
+      description: "Gender (M, F)."
 
-labels:
-  domain: clin_syn
-  table: patients
-  layer: bronze
-  env: np
+    - name: "RACE"
+      type: "STRING"
+      mode: "REQUIRED"
+      description: "Race of the patient."
 
+    - name: "ETHNICITY"
+      type: "STRING"
+      mode: "REQUIRED"
+      description: "Ethnicity of the patient."
 
+# ==============================================================================
+# 2. DATA QUALITY EXPECTATIONS
+# Drivers for Great Expectations and Python Pre-checks.
+# ==============================================================================
+quality:
+  # FAIL the row if these rules are violated
+  row_level_checks:
+    - column: "Id"
+      rule: "uuid_format"
+      error_msg: "Patient Id must be a valid UUID."
+
+    - column: "BIRTHDATE"
+      rule: "not_null"
+      error_msg: "Patient Birth Date is mandatory."
+
+    - column: "GENDER"
+      rule: "regex_match"
+      pattern: "^[MF]$"
+      error_msg: "Gender must be either M or F."
+
+# ==============================================================================
+# 3. STORAGE STRATEGY
+# Directives for BigQuery table creation.
+# ==============================================================================
+storage:
+  partition_by:
+    field: "BIRTHDATE"
+    type: "YEAR"
+  
+  cluster_by: ["LAST", "FIRST"]
+  
+  description: "Bronze layer table for raw Synthea patients data."

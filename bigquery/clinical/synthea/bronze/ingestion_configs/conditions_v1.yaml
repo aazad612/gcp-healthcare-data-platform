@@ -47,7 +47,6 @@ schema:
 # Drivers for Great Expectations and Python Pre-checks.
 # ==============================================================================
 quality:
-  # FAIL the row if these rules are violated
   row_level_checks:
     - column: "CODE"
       rule: "regex_match"
