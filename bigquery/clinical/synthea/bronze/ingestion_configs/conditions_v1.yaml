@@ -7,7 +7,6 @@ description: "Patient diagnoses and conditions from Synthea EMR."
 # Defines the structure, types, and primary keys for dbt/BigQuery.
 # ==============================================================================
 schema:
-  # CRITICAL FOR DBT: Defines uniqueness tests
   primary_key: ["PATIENT", "CODE", "START"]
   
   columns:
