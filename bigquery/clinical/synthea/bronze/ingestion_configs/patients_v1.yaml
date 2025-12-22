@@ -1,7 +1,6 @@
 version: "1.0"
 entity: "patients"
 description: "Demographic information for patients in the Synthea EMR."
-
 # ==============================================================================
 # 1. THE SCHEMA
 # Defines the structure, types, and primary keys for dbt/BigQuery.

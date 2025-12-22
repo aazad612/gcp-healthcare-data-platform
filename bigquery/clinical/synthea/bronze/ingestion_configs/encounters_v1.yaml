@@ -1,35 +1,90 @@
-job_name: encounters-stream-bronze
-runner: DataflowRunner
-region: us-central1
-project: prj-lbd-shared-np
+version: "1.0"
+entity: "encounters"
+description: "Patient encounter and visit details from Synthea EMR."
 
-autoscaling_algorithm: THROUGHPUT_BASED
-max_workers: 5
-num_workers: 1
-worker_machine_type: e2-small
+# ==============================================================================
+# 1. THE SCHEMA
+# Defines the structure, types, and primary keys for dbt/BigQuery.
+# ==============================================================================
+schema:
+  primary_key: ["Id"]
+  
+  columns:
+    - name: "Id"
+      type: "STRING"
+      mode: "REQUIRED"
+      description: "UUID of the encounter."
 
-sdk_container_image: "apache/beam_python3.10_sdk:2.57.0"
+    - name: "START"
+      type: "DATETIME"
+      mode: "REQUIRED"
+      format: "%Y-%m-%dT%H:%M:%SZ"
+      description: "Start time of the encounter."
 
-temp_location: gs://bkt-df-temp-np-prj-lbd-shared-np/temp
-staging_location: gs://bkt-df-temp-np-prj-lbd-shared-np/staging
+    - name: "STOP"
+      type: "DATETIME"
+      mode: "REQUIRED"
+      format: "%Y-%m-%dT%H:%M:%SZ"
+      description: "End time of the encounter."
 
-# Pub/Sub ingestion topic
-input_subscription: "projects/prj-lbd-shared-np/subscriptions/df-ingest-sub-np"
+    - name: "PATIENT"
+      type: "STRING"
+      mode: "REQUIRED"
+      description: "UUID of the patient (Foreign Key to Patients table)."
 
-# Bronze output table
-output_table: "prj-clin-syn-np.bronze.encounters"
+    - name: "ORGANIZATION"
+      type: "STRING"
+      mode: "REQUIRED"
+      description: "UUID of the organization providing the service."
 
-# Contract + validation configs
-schema_contract_path: "gs://bkt-clin-syn-configs-np/contracts/encounters_v1.json"
-insert_metadata: true
-detect_schema_drift: true
+    - name: "PROVIDER"
+      type: "STRING"
+      mode: "NULLABLE"
+      description: "UUID of the provider performing the service."
 
-# Performance
-save_main_session: true
-streaming: true
+    - name: "ENCOUNTERCLASS"
+      type: "STRING"
+      mode: "REQUIRED"
+      description: "The class of encounter (e.g., ambulatory, emergency, inpatient)."
 
-labels:
-  domain: clin_syn
-  table: encounters
-  layer: bronze
-  env: np
+    - name: "CODE"
+      type: "STRING"
+      mode: "REQUIRED"
+      description: "Standard code for the encounter type."
+
+    - name: "DESCRIPTION"
+      type: "STRING"
+      mode: "NULLABLE"
+      description: "Description of the encounter."
+
+# ==============================================================================
+# 2. DATA QUALITY EXPECTATIONS
+# Drivers for Great Expectations and Python Pre-checks.
+# ==============================================================================
+quality:
+  # FAIL the row if these rules are violated
+  row_level_checks:
+    - column: "Id"
+      rule: "uuid_format"
+      error_msg: "Encounter Id must be a valid UUID."
+
+    - column: "START"
+      rule: "not_null"
+      error_msg: "Encounter Start time is mandatory."
+
+    - column: "PATIENT"
+      rule: "uuid_format"
+      error_msg: "Patient ID must be a valid UUID."
+
+# ==============================================================================
+# 3. STORAGE STRATEGY
+# Directives for BigQuery table creation.
+# ==============================================================================
+storage:
+  partition_by:
+    field: "START"
+    type: "MONTH"
+  
+  cluster_by: ["PATIENT", "ENCOUNTERCLASS"]
+  
+  description: "Bronze layer table for raw Synthea encounters data."
