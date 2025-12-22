@@ -4,7 +4,6 @@ on:
   push:
     branches: [ dev, main ]
     paths:
-      - 'bigquery/clinical/synthea/bronze/contracts/**'
       - 'bigquery/clinical/synthea/bronze/ingestion_configs/**'
       - '.github/workflows/sync_contracts.yml'
 
@@ -28,20 +27,14 @@ jobs:
           BRANCH="${GITHUB_REF_NAME}"
 
           if [[ "$BRANCH" == "main" ]]; then
-            # ---- PROD ----
             echo "TARGET_PROJECT=prj-lbd-shared-pd" >> $GITHUB_ENV
             echo "TARGET_BUCKET=bkt-clin-syn-configs-pd" >> $GITHUB_ENV
             echo "TARGET_SA=project-service-account@prj-lbd-shared-pd.iam.gserviceaccount.com" >> $GITHUB_ENV
           else
-            # ---- DEV / TEST / QA (only dev triggers pipeline) ----
             echo "TARGET_PROJECT=prj-lbd-shared-np" >> $GITHUB_ENV
             echo "TARGET_BUCKET=bkt-clin-syn-configs-np" >> $GITHUB_ENV
             echo "TARGET_SA=project-service-account@prj-lbd-shared-np.iam.gserviceaccount.com" >> $GITHUB_ENV
           fi
-
-          echo "Environment resolved:"
-          echo "  → Bucket: $TARGET_BUCKET"
-          echo "  → Target SA: $TARGET_SA"
 
       # ---------------------------------------------------
       # 2. Authenticate via Workload Identity Federation
@@ -57,30 +50,20 @@ jobs:
       # ---------------------------------------------------
       - name: Impersonate Target Project SA
         run: |
-          echo "Setting impersonation for: $TARGET_SA"
           gcloud config set auth/impersonate_service_account "$TARGET_SA"
 
       # ---------------------------------------------------
-      # 4. Sync contracts + ingestion configs to GCS
+      # 4. Sync ONLY changed ingestion configs to GCS
       # ---------------------------------------------------
-      - name: Sync Contract Files to GCS
+      - name: Sync Ingestion Configs to GCS
         run: |
-          echo "Syncing to bucket: gs://$TARGET_BUCKET/"
+          echo "Syncing changed ingestion configs to bucket: gs://$TARGET_BUCKET/"
 
-          # Upload everything under contracts + ingestion configs
           if compgen -G "bigquery/clinical/synthea/bronze/ingestion_configs/*" > /dev/null; then
-            echo "Uploading ingestion configs..."
+            # 'gcloud storage rsync' only copies files where checksums or sizes differ.
             gcloud storage rsync -r bigquery/clinical/synthea/bronze/ingestion_configs gs://$TARGET_BUCKET/clinical/synthea/bronze/ingestion_configs
           else
             echo "No ingestion configs found. Skipping."
           fi
-
-          if compgen -G "bigquery/clinical/synthea/bronze/contracts/*" > /dev/null; then
-            echo "Uploading contract files..."
-            gcloud storage rsync -r bigquery/clinical/synthea/bronze/contracts gs://$TARGET_BUCKET/clinical/synthea/bronze/contracts
-          else
-            echo "No contract files found. Skipping."
-          fi
-
 
           echo "✅ Sync complete."

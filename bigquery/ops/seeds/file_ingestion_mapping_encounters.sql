@@ -1,3 +1,9 @@
+DELETE FROM `{{PROJECT_ID}}.{{DATASET_ID}}.file_ingestion_mapping`
+WHERE env = 'dev' 
+  AND domain = 'clinical' 
+  AND system_name = 'synthea' 
+  AND entity = 'encounters';
+
 INSERT INTO `{{PROJECT_ID}}.{{DATASET_ID}}.file_ingestion_mapping` (
     env,
     -- 1. Matching Logic
@@ -30,6 +36,7 @@ INSERT INTO `{{PROJECT_ID}}.{{DATASET_ID}}.file_ingestion_mapping` (
 
     -- 6. Dataflow Path
     gcs_dataflow_template,
+    dlq_method, 
 
     -- 7. Airflow Path
     validation_dag, 
@@ -62,20 +69,21 @@ VALUES (
     -- 3. Metadata
     'clinical', 
     'synthea', 
-    'patients',
+    'encounters',
 
     -- 4. Execution Configs
-    'bkt-clin-syn-configs-np', -- [FIXED] Comma included
-    'clinical/synthea/bronze/contracts/patients_v1.json',
-    'clinical/synthea/bronze/ingestion_configs/patients_v1.yaml',
+    'bkt-clin-syn-configs-np', 
+    'clinical/synthea/bronze/contracts/encounters_v1.json',
+    'clinical/synthea/bronze/ingestion_configs/encounters_v1.yaml',
 
     -- 5. Destination 
-    'prj-clin-syn-np', -- [FIXED] 'cli' -> 'clin'
+    'prj-clin-syn-np', 
     'synthea_bronze_dev', 
-    'patients',
+    'encounters',
 
     -- 6. Dataflow 
-    'clinical/synthea/bronze/dataflow/patients_v1.json', 
+    'clinical/synthea/bronze/dataflow/encounters_v1.json',
+    'gcs,bq',
 
     -- 7. Airflow
     NULL, NULL, NULL, NULL,

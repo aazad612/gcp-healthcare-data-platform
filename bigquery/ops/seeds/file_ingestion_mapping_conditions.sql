@@ -1,3 +1,9 @@
+DELETE FROM `{{PROJECT_ID}}.{{DATASET_ID}}.file_ingestion_mapping`
+WHERE env = 'dev' 
+  AND domain = 'clinical' 
+  AND system_name = 'synthea' 
+  AND entity = 'conditions';
+
 INSERT INTO `{{PROJECT_ID}}.{{DATASET_ID}}.file_ingestion_mapping` (
     env,
     -- 1. Matching Logic
