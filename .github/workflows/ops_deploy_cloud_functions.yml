@@ -5,7 +5,7 @@ on:
     branches: [ dev, main ]
     paths:
       - "bigquery/ops/cloud_functions/**"
-      - ".github/workflows/ops_deploy_cloud_functions.yml"
+      - .github/workflows/ops_deploy_cloud_functions.yml"
 
 # ---------------------------------------------------------
 # GLOBAL VARS: Add new functions here (folder names)
