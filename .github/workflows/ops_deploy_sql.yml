@@ -13,7 +13,8 @@ on:
 # ---------------------------------------------------------
 env:
   FILE_LIST: >
-    bigquery/ops/seeds/file_ingestion_mapping_conditions.sql
+    bigquery/ops/seeds/file_ingestion_mapping_encounters.sql,
+    bigquery/ops/seeds/file_ingestion_mapping_patients.sql
 
 jobs:
   deploy_ops_sql:
