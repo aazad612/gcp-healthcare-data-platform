@@ -3,28 +3,32 @@
 The primary goal of this bronge lawyer ingestion framework is to efficiency by making it metadata driven and putting guardrails that avoid rework. There are 2 guardrails in place before the dataflow comes into picture. 
 
 ## Pre-Dataflow guardrails 
-1. Table creation - is handled by github actions which validate the schema for standards and partitioning/clustering + meta column existence. 
 
-[Table Creation Standards](../../bigquery/ops/tables/standards_definition.sql)
-[validate schema script](../../bigquery/scripts/validate_schema.py)
+### 1. Table creation
+Table creation is handled by github actions which validate the schema for standards and partitioning/clustering + meta column existence. 
 
-2. Cloud function - Triggered when a file arrives in the GCS bucket 
-main.py, metadata.py are to be used elsewhere, csv_validator.py is specific to CSV validation. To be added JSON, Paruet and AVRO. 
-[CSV validator] (../../../cloud_functions/csv_validator)
+* [Table Creation Standards](../../bigquery/ops/tables/standards_definition.sql)
+* [Table Creation Standards-seed](../../bigquery/ops/seeds/bronze_v1_standards.sql)
+* [Validate Schema script](../../bigquery/scripts/validate_schema.py)
 
-a. File path validation 
-b. Sample row validation - top N rows validated, specified in the file_ingestion_mapping to be dynamic
+### 2. Cloud function
+Triggered when a file arrives in the GCS bucket. `main.py` and `metadata.py` are to be used elsewhere; `csv_validator.py` is specific to CSV validation. (To be added: JSON, Parquet, and AVRO).
+
+* [CSV validator](../../../cloud_functions/csv_validator)
+
+#### Validation steps:
+* **a. File path validation**
+* **b. Sample row validation** - top N rows validated, specified in the `file_ingestion_mapping` to be dynamic.
     * Header Validation 
     * Unicode characters 
-    * delimiter check 
+    * Delimiter check 
     * Binary / null bytes 
-    * To be added - datatype validation 
-c. Schema Drift 
-    * Based on simple JSON contracts which include only business columns 
-    * The JSON contracts are automatically generated from YAML contracts 
-    * To be added - Acceptable, Unacceptable
-d. Made audit entry - to be used by notification channels, dataflow and airflow. 
-e. Directly kick off dataflow job. 
+    * *To be added:* datatype validation 
+* **c. Schema Drift** * Based on simple JSON contracts which include only business columns.
+    * The JSON contracts are automatically generated from YAML contracts.
+    * *To be added:* Acceptable vs. Unacceptable drift thresholds.
+* **d. Audit entry** - Created to be used by notification channels, Dataflow, and Airflow. 
+* **e. Dataflow Trigger** - (Mostly will be dropped off) - Directly kick off the Dataflow job upon successful validation.
 
 
 ## Data Flow Job for CSV files
