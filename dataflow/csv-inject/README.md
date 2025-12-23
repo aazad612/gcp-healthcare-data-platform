@@ -12,13 +12,14 @@ Table creation is handled by github actions which validate the schema for standa
 * [Validate Schema script](../../bigquery/scripts/validate_schema.py)
 
 ### 2. Cloud function
-Triggered when a file arrives in the GCS bucket. `main.py` and `metadata.py` are to be used elsewhere; `csv_validator.py` is specific to CSV validation. (To be added: JSON, Parquet, and AVRO).
+Triggered when a file arrives in the GCS bucket. [main.py](../../cloud_functions/csv_validator/main.py), [steps.py](../../cloud_functions/csv_validator/steps.py) and [context.py](../../cloud_functions/csv_validator/context.py) are to be used elsewhere; [csv_validator.py](../../cloud_functions/csv_validator/csv_validator.py)  is specific to CSV validation. (To be added: JSON, Parquet, and AVRO).
 
 * [CSV validator](../../../cloud_functions/csv_validator)
 
+
 #### Validation steps:
 * **a. File path validation**
-* **b. Sample row validation** - top N rows validated, specified in the `file_ingestion_mapping` to be dynamic.
+* **b. Sample row validation** - top N rows validated, specified in the [file_ingestion_mapping](/../../bigquery/ops/tables/file_ingestion_mapping.sql) to be dynamic.
     * Header Validation 
     * Unicode characters 
     * Delimiter check 
@@ -34,32 +35,40 @@ Triggered when a file arrives in the GCS bucket. `main.py` and `metadata.py` are
 ## Data Flow Job for CSV files
 
 ### 🏗️ Architectural Guardrails (Metadata Roles)
-The `metadata.py` module aggregates four critical sources of truth that drive the pipeline's behavior:
+The [metadata.py](./metadata.py) module aggregates four critical sources of truth that drive the pipeline's behavior:
 
 ### 1. File Ingestion Mapping Table (The Orchestrator)
 This BigQuery table is the **Entry Guardrail**. If an entity is not registered here, the engine ignores it.
 * **Role:** Maps the combination of `domain`, `unit`, and `table_name` to specific GCS configuration paths and DLQ policies.
 * **Enforcement:** Controls environment-specific routing and ensures every load is tied to a specific version of a governance standard.
 
+[Ingestion Mapping](../../bigquery/ops/tables/file_ingestion_mapping.sql)
+
 ### 2. Ingestion Audit / Target State (The Lineage Tracker)
 The target BigQuery table itself acts as the **State Guardrail**. 
 * **Role:** The pipeline performs a pre-flight `MAX(meta_batch_id)` query on this table to determine the next atomic batch. 
 * **Enforcement:** Prevents lineage gaps and ensures that every ingestion job is incremented based on the actual successful state of the database.
+
+[Ingestion Audit](../../bigquery/ops/tables/file_ingestion_audit.sql)
 
 ### 3. YAML Ingestion Contracts (The Physical Rulebook)
 Stored in GCS, these files serve as the **Physical Guardrail**. 
 * **Role:** They define the authoritative column order, data types, and required modes (NULLABLE/REQUIRED). 
 * **Enforcement:** Used directly by the `ValidateAndParse` logic to perform schema drift detection and type-casting validation before data ever touches BigQuery.
 
+[sample YAML contract](../../bigquery/clinical/synthea/bronze/ingestion_configs/conditions_v1.yaml)
+
 ### 4. JSON Data Contracts (The Integration Standard)
-These are machine-readable definitions derived from the YAML contracts.
+These are machine-readable definitions derived from the YAML contracts. Stored only in GCS now as they are automatically generated. 
 * **Role:** They provide a single source of truth for downstream systems like Dataform and automated documentation tools.
 * **Enforcement:** Ensures that the analytical layer and the ingestion layer are perfectly synchronized regarding the expected schema of the Bronze layer.
+
+[sample JSON contract](../../bigquery/clinical/synthea/bronze/contract/conditions_sample.json)
 
 ---
 
 ## 🚀 Pipeline Execution Engine (`main.py`)
-The `main.py` script is the core executor that transforms these guardrails into a running Apache Beam graph.
+The [main.py](./main.py) script is the core executor that transforms these guardrails into a running Apache Beam graph.
 
 ### **1. Pre-Flight Validation & Schema Generation**
 Before the pipeline begins, `main.py` executes `validate_target_compliance` to ensure the BigQuery target is structuraly ready. It then invokes `generate_bq_schema`, which creates a dynamic JSON schema hint. This hint is critical for the Storage Write API to handle temporal fields (Dates/Timestamps) as strings to avoid SDK serialization crashes.

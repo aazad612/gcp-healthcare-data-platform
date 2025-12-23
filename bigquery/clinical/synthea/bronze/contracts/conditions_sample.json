@@ -1,0 +1,56 @@
+[
+  {
+    "name": "id",
+    "type": "STRING",
+    "mode": "REQUIRED",
+    "description": "UUID of the encounter."
+  },
+  {
+    "name": "start",
+    "type": "DATETIME",
+    "mode": "REQUIRED",
+    "description": "Start time of the encounter."
+  },
+  {
+    "name": "stop",
+    "type": "DATETIME",
+    "mode": "REQUIRED",
+    "description": "End time of the encounter."
+  },
+  {
+    "name": "patient",
+    "type": "STRING",
+    "mode": "REQUIRED",
+    "description": "UUID of the patient (Foreign Key to Patients table)."
+  },
+  {
+    "name": "organization",
+    "type": "STRING",
+    "mode": "REQUIRED",
+    "description": "UUID of the organization providing the service."
+  },
+  {
+    "name": "provider",
+    "type": "STRING",
+    "mode": "NULLABLE",
+    "description": "UUID of the provider performing the service."
+  },
+  {
+    "name": "encounterclass",
+    "type": "STRING",
+    "mode": "REQUIRED",
+    "description": "The class of encounter (e.g., ambulatory, emergency, inpatient)."
+  },
+  {
+    "name": "code",
+    "type": "STRING",
+    "mode": "REQUIRED",
+    "description": "Standard code for the encounter type."
+  },
+  {
+    "name": "description",
+    "type": "STRING",
+    "mode": "NULLABLE",
+    "description": "Description of the encounter."
+  }
+]
