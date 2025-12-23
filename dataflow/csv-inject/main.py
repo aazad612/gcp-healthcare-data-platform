@@ -309,4 +309,4 @@ def run(argv=None):
                              file_naming=DynamicGCSNaming()))
 
 if __name__ == '__main__':
-    run()
+    run()   
