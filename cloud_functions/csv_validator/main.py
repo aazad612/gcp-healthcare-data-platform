@@ -63,8 +63,6 @@ def trigger_ingestion(cloud_event):
     return "OK"
 
 
-# ... [Paste this at the bottom of main.py] ...
-
 if __name__ == "__main__":
     import os
     import sys

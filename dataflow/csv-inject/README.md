@@ -12,9 +12,12 @@ Table creation is handled by github actions which validate the schema for standa
 * [Validate Schema script](../../bigquery/scripts/validate_schema.py)
 
 ### 2. Cloud function
-Triggered when a file arrives in the GCS bucket. [main.py](../../cloud_functions/csv_validator/main.py), [steps.py](../../cloud_functions/csv_validator/steps.py) and [context.py](../../cloud_functions/csv_validator/context.py) are to be used elsewhere; [csv_validator.py](../../cloud_functions/csv_validator/csv_validator.py)  is specific to CSV validation. (To be added: JSON, Parquet, and AVRO).
-
-* [CSV validator](../../../cloud_functions/csv_validator)
+Triggered when a file arrives in the GCS bucket. The first 3 files are generic and would be used for other file formats. csv_validator is code specific to CSV files validation.
+* [context.py](../../cloud_functions/csv_validator/context.py) - Common metadata
+* [main.py](../../cloud_functions/csv_validator/main.py) - mainly just does the execution control
+* [steps.py](../../cloud_functions/csv_validator/steps.py) - generic steps and are to be used elsewhere
+* [csv_validator.py](../../cloud_functions/csv_validator/csv_validator.py)  is specific to CSV validation. 
+* (To be added: JSON, Parquet, and AVRO).
 
 
 #### Validation steps:
@@ -53,7 +56,7 @@ The target BigQuery table itself acts as the **State Guardrail**.
 
 ### 3. YAML Ingestion Contracts (The Physical Rulebook)
 Stored in GCS, these files serve as the **Physical Guardrail**. 
-* **Role:** They define the authoritative column order, data types, and required modes (NULLABLE/REQUIRED). 
+* **Role:** They define the authoritative column order, data types, required modes (NULLABLE/REQUIRED) and list of valid values where applicable. 
 * **Enforcement:** Used directly by the `ValidateAndParse` logic to perform schema drift detection and type-casting validation before data ever touches BigQuery.
 
 [sample YAML contract](../../bigquery/clinical/synthea/bronze/ingestion_configs/conditions_v1.yaml)
@@ -82,11 +85,12 @@ This is the heart of the pipeline. It processes each file and performs:
 ### **3. Provider Registry (Decoupled Governance)**
 `main.py` implements the `get_meta_provider_registry`. This pattern separates the **logic** of metadata generation (UUIDs, Batch IDs, Timestamps) from the **assignment** to columns. This allows the governance standards to add or rename `meta_` columns without requiring changes to the core processing logic.
 
-### **4. Storage Write API & DLQ Sink**
-The pipeline uses the **Storage Write API** for all BigQuery sinks.
+### **4. Storage Write API & DLQ Sinks**
+The pipeline uses the **Storage Write API** for all BigQuery sinks. For a more mature pipeline the free FILE_LOADS can be used to reduce costs. For reducing latency use STORAGE_API_AT_LEAST_ONCE (testing required). 
 * **Success Sink:** Writes valid rows to the Bronze target.
 * **Error Capture:** Uses the `FailedRows` attribute of the Storage Write API to catch rows that passed initial validation but failed BigQuery's internal constraints (e.g., partition violations).
 * **Flattened DLQ:** Combines validation failures and BigQuery failures into a single stream for dual-output to **BigQuery `{table}_bad`** and **GCS JSON errors**.
+* Tobe added - **Pubsub Sink**, Archival, error segregation, STORAGE_API_AT_LEAST_ONCE testing. 
 
 ### **5. Stateful Batch Management (Atomic Lineage)
 Lineage and auditability are managed through stateful tracking, ensuring that every row can be traced back to a specific ingestion event.
