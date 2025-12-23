@@ -90,9 +90,9 @@ The pipeline uses the **Storage Write API** for all BigQuery sinks. For a more m
 * **Success Sink:** Writes valid rows to the Bronze target.
 * **Error Capture:** Uses the `FailedRows` attribute of the Storage Write API to catch rows that passed initial validation but failed BigQuery's internal constraints (e.g., partition violations).
 * **Flattened DLQ:** Combines validation failures and BigQuery failures into a single stream for dual-output to **BigQuery `{table}_bad`** and **GCS JSON errors**.
-* Tobe added - **Pubsub Sink**, Archival, error segregation, STORAGE_API_AT_LEAST_ONCE testing. 
+* Tobe added - **Pubsub Sink**, Archival, error segregation, STORAGE_API_AT_LEAST_ONCE testing, scaling based on file_size and priority. 
 
-### **5. Stateful Batch Management (Atomic Lineage)
+### 5. Stateful Batch Management (Atomic Lineage)
 Lineage and auditability are managed through stateful tracking, ensuring that every row can be traced back to a specific ingestion event.
 * **Dynamic High-Water Mark:** Instead of hardcoding batch IDs, the engine queries the target table at runtime to calculate `MAX(meta_batch_id) + 1`.
 * **Temporal Stability:** A consistent `job_timestamp` is established at the start of the job and used across all valid and invalid rows, ensuring an atomic timeline for the entire batch.
@@ -100,7 +100,6 @@ Lineage and auditability are managed through stateful tracking, ensuring that ev
 ---
 
 ## Other Enhancements 
-* **Storage Write API:** High-performance gRPC ingestion with row-level error feedback.
 * **Stable Serialization:** Maps all temporal types to `STRING` in the schema hint to bypass the Beam Python SDK `.micros` bug.
 * **VPC-SC Readiness:** Strictly targets `WorkerOptions` for networking (Subnetworks, Internal IPs) to ensure compliance in locked-down GCP environments.
 
