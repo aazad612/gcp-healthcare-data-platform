@@ -2,7 +2,7 @@
 
 The primary goal of this bronge lawyer ingestion framework is to efficiency by making it metadata driven and putting guardrails that avoid rework. There are 2 guardrails in place before the dataflow comes into picture. 
 
-While the development of this project is kicked off with CSV due to its popularily, Parquet and Avro would be preferred choices for ongoing development. 
+While the development of this project is kicked off with CSV due to its popularily, Parquet and Avro would be added for other use cases. 
 
 | Ingestion Method | Format | Throughput (MBps) | Throughput (Elements/s) |
 | :--- | :--- | :--- | :--- |
