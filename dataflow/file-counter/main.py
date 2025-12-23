@@ -6,7 +6,7 @@ import json
 import uuid
 import apache_beam as beam
 from apache_beam.io.fileio import MatchFiles, ReadMatches
-from apache_beam.options.pipeline_options import PipelineOptions, GoogleCloudOptions
+from apache_beam.options.pipeline_options import PipelineOptions, GoogleCloudOptions, WorkerOptions
 from google.cloud import bigquery
 
 # STRICTLY IMPORT YOUR METADATA MODULE
@@ -49,31 +49,101 @@ def validate_target_compliance(target_project, target_dataset, target_table, sta
     logging.info(f"✅ Target Table {table_ref} is compliant with Bronze Standards.")
     return True
 
-def populate_meta_columns(row, file_name, system_name, row_uuid):
+def generate_bq_schema(contract_columns, governance_standards):
     """
-    Appends meta columns to an existing data row.
+    DYNAMICALLY builds the BQ JSON schema for the Storage Write API.
+    FIX: Map all temporal types to STRING to avoid Beam SDK serialization bugs.
     """
-    now = datetime.datetime.now()
-    ts_iso = now.isoformat()
-    date_iso = now.date().isoformat()
+    schema_fields = []
+    
+    # 1. Add Data Columns from Contract
+    for col in contract_columns:
+        dtype = col['type']
+        if dtype in ('DATE', 'TIMESTAMP', 'DATETIME'):
+            dtype = 'STRING'
+        schema_fields.append({'name': col['name'], 'type': dtype, 'mode': col.get('mode', 'NULLABLE')})
+    
+    # 2. Add Meta Columns from Governance Standards
+    for col_name, rules in governance_standards.items():
+        dtype = rules['type']
+        if dtype in ('DATE', 'TIMESTAMP', 'DATETIME'):
+            dtype = 'STRING'
+        schema_fields.append({
+            'name': col_name, 
+            'type': dtype, 
+            'mode': 'REQUIRED' if rules['mandatory'] else 'NULLABLE'
+        })
+        
+    return {'fields': schema_fields}
 
-    row['meta_row_uuid'] = row_uuid
-    row['meta_batch_id'] = '0' 
-    row['meta_source_system'] = system_name
-    row['meta_source_filename'] = file_name
-    row['meta_source_filedate'] = date_iso
-    row['meta_ingest_timestamp'] = ts_iso
-    row['meta_dq_flag'] = 'PASS'
-    row['meta_created_by'] = 'dataflow_ingest'
-    row['meta_created_date'] = ts_iso
-    row['meta_updated_by'] = 'dataflow_ingest'
-    row['meta_updated_date'] = ts_iso
+def check_schema_drift(header_line, contract_columns):
+    """
+    Ensures the incoming file header matches the Data Contract.
+    """
+    expected_header = [col['name'].upper() for col in contract_columns]
+    file_header = [h.strip().upper() for h in header_line.split(',')]
+    if file_header != expected_header:
+        raise ValueError(f"SCHEMA DRIFT DETECTED: Expected {expected_header}, found {file_header}")
+    logging.info("✅ Schema Drift check passed.")
+    return True
+
+class ParseBigQueryErrors(beam.DoFn):
+    """
+    Captures row-level insertion failures from the BigQuery Storage Write API.
+    """
+    def process(self, element, job_ts):
+        destination = element[0]
+        row = element[1]
+        error_info = element[2]
+        error_str = str(error_info)
+        yield {
+            'original_payload': json.dumps(row),
+            'error_message': f"Table: {destination} | Error: {error_str}",
+            'failure_type': 'BQ_STORAGE_WRITE_FAILURE',
+            'file_name': row.get('meta_source_filename', 'UNKNOWN'),
+            'timestamp': job_ts, # String format
+            'dq_status': 'FAIL'
+        }
+
+def get_meta_provider_registry(file_name, system_name, row_uuid, batch_id, job_ts):
+    """
+    DECOUPLED REGISTRY: Logic providers for governance columns.
+    Uses ISO Strings for all temporal fields to ensure stable serialization.
+    """
+    # job_ts is already an ISO string from metadata.py
+    return {
+        'meta_row_uuid': lambda: row_uuid,
+        'meta_batch_id': lambda: batch_id,
+        'meta_source_system': lambda: system_name,
+        'meta_source_filename': lambda: file_name,
+        'meta_source_filedate': lambda: job_ts[:10], # Extract YYYY-MM-DD
+        'meta_ingest_timestamp': lambda: job_ts,
+        'meta_dq_flag': lambda: 'PASS',
+        'meta_created_by': lambda: 'dataflow_ingest',
+        'meta_created_date': lambda: job_ts,
+        'meta_updated_by': lambda: 'dataflow_ingest',
+        'meta_updated_date': lambda: job_ts
+    }
+
+def populate_meta_columns(row, file_name, system_name, row_uuid, standards, batch_id, job_ts, dq_status):
+    """
+    DYNAMICALLY appends meta columns based on the Governance Standards.
+    """
+    providers = get_meta_provider_registry(file_name, system_name, row_uuid, batch_id, job_ts)
+
+    for col_name in standards.keys():
+        if col_name == 'meta_dq_flag':
+            row[col_name] = dq_status
+        elif col_name in providers:
+            row[col_name] = providers[col_name]()
+        else:
+            row[col_name] = None
     
     return row
 
 def validate_value(value, dtype, col_name):
     """
-    Validates a single value against the Contract Data Type.
+    Strict type checking against Contract Data Types.
     """
     value = value.strip()
     dtype = dtype.upper()
@@ -87,9 +157,9 @@ def validate_value(value, dtype, col_name):
         elif dtype in ('TIMESTAMP', 'DATETIME'):
             datetime.datetime.fromisoformat(value.replace('Z', '+00:00'))
             return value
-        elif dtype in ('INTEGER', 'INT64', 'INT'):
+        elif dtype in ('INTEGER', 'INT64'):
             return int(value)
-        elif dtype in ('FLOAT', 'FLOAT64', 'NUMERIC'):
+        elif dtype in ('FLOAT', 'FLOAT64'):
             return float(value)
         elif dtype == 'STRING':
             return value
@@ -97,41 +167,37 @@ def validate_value(value, dtype, col_name):
         raise ValueError(f"Invalid {dtype} for {col_name}: '{value}'")
     return value
 
-class ParseBigQueryErrors(beam.DoFn):
-    def process(self, element):
-        destination = element[0]
-        row = element[1]
-        error_info = element[2]
-        error_str = str(error_info)
-        yield {
-            'original_payload': json.dumps(row),
-            'error_message': f"Table: {destination} | Error: {error_str}",
-            'failure_type': 'BQ_INSERT_FAILURE',
-            'file_name': row.get('meta_source_filename', 'UNKNOWN'),
-            'timestamp': datetime.datetime.now().isoformat()
-        }
-
-def check_schema_drift(header_line, contract_columns):
-    expected_header = [col['name'].upper() for col in contract_columns]
-    file_header = [h.strip().upper() for h in header_line.split(',')]
-    if file_header != expected_header:
-        raise ValueError(f"SCHEMA DRIFT: Expected {expected_header}, found {file_header}")
-    return True
-
 class ValidateAndParse(beam.DoFn):
     """
-    Validates against Contract AND populates Governance Meta Columns.
+    Core logic: Drift Detection, Validation, and Meta Population.
     """
-    def process(self, readable_file, contract_columns, unit):
+    def process(self, readable_file, contract_columns, unit, standards, batch_id, job_ts):
         file_path = readable_file.metadata.path
         
         with readable_file.open() as f:
-            lines = f.read().decode('utf-8').splitlines()
+            content = f.read().decode('utf-8')
+            if not content:
+                return
+            lines = content.splitlines()
+
+        # 1. Check Schema Drift
+        try:
+            check_schema_drift(lines[0], contract_columns)
+        except Exception as e:
+            yield beam.pvalue.TaggedOutput(TAG_INVALID, {
+                'original_payload': lines[0],
+                'error_message': str(e),
+                'file_name': file_path,
+                'timestamp': job_ts,
+                'dq_status': 'FAIL',
+                'failure_type': 'SCHEMA_DRIFT'
+            })
+            return 
 
         expected_col_count = len(contract_columns)
         
         for line in lines:
-            if contract_columns and line.startswith(contract_columns[0]['name']):
+            if not line or (contract_columns and line.startswith(contract_columns[0]['name'])):
                 continue
 
             try:
@@ -139,15 +205,11 @@ class ValidateAndParse(beam.DoFn):
                 if len(row_values) != expected_col_count:
                     raise ValueError(f"Col count mismatch. Expected {expected_col_count}, got {len(row_values)}")
 
-                # 1. Map and Validate against Contract
-                row = {}
-                for i, field in enumerate(contract_columns):
-                    val = validate_value(row_values[i], field['type'], field['name'])
-                    row[field['name']] = val
+                row = {field['name']: validate_value(row_values[i], field['type'], field['name']) 
+                       for i, field in enumerate(contract_columns)}
                 
-                # 2. Populate Governance Meta Columns
                 row_uuid = str(uuid.uuid4())
-                row = populate_meta_columns(row, file_path, unit, row_uuid)
+                row = populate_meta_columns(row, file_path, unit, row_uuid, standards, batch_id, job_ts, 'PASS')
                 
                 yield beam.pvalue.TaggedOutput(TAG_VALID, row)
 
@@ -156,121 +218,95 @@ class ValidateAndParse(beam.DoFn):
                     'original_payload': line,
                     'error_message': str(e),
                     'file_name': file_path,
-                    'timestamp': datetime.datetime.now().isoformat()
+                    'timestamp': job_ts,
+                    'dq_status': 'FAIL',
+                    'failure_type': 'VALIDATION_FAILURE'
                 })
 
 class DynamicGCSNaming(beam.io.fileio.FileNaming):
     def __call__(self, window, pane, shard_index, total_shards, compression, destination):
-        base_path = destination
-        if '.' in base_path:
-            return re.sub(r'(\.[^.]+)$', r'_bad\1', base_path)
-        return base_path + '_bad'
+        clean_name = destination.split('/')[-1].replace('.csv', '')
+        return f"errors/{clean_name}_bad_{shard_index}.json"
 
 def run(argv=None):
     parser = argparse.ArgumentParser()
-    parser.add_argument('--domain', required=True)
-    parser.add_argument('--unit', required=True)
-    parser.add_argument('--table_name', required=True)
-    parser.add_argument('--env', required=True)
+    parser.add_argument('--domain', default='clinical')
+    parser.add_argument('--unit', default='synthea')
+    parser.add_argument('--table_name', default='conditions')
+    parser.add_argument('--env', default='dev')
     known_args, pipeline_args = parser.parse_known_args(argv)
 
     # 1. LOAD METADATA
-    meta = metadata.get_metadata(
-        domain=known_args.domain,
-        unit=known_args.unit,
-        table_name=known_args.table_name,
-        env=known_args.env
-    )
-
-    infra = meta['infrastructure']
-    orch = meta['orchestration']
-    contract = meta['contract']
-    governance = meta['governance']  # The Bronze standards
+    meta = metadata.get_metadata(known_args.domain, known_args.unit, known_args.table_name, known_args.env)
+    infra, orch, contract, gov, ctx = meta['infrastructure'], meta['orchestration'], meta['contract'], meta['governance'], meta['context']
     
-    # 2. PRE-FLIGHT GOVERNANCE CHECK
-    validate_target_compliance(
-        target_project=infra['service_project'],
-        target_dataset=infra['dataset'],
-        target_table=known_args.table_name,
-        standards=governance
-    )
+    validate_target_compliance(infra['service_project'], infra['dataset'], known_args.table_name, gov)
 
-    # 3. SETUP PIPELINE CONFIG
-    project_id = infra['service_project']
-    dataset_id = infra['dataset']
-    target_table_ref = f"{project_id}:{dataset_id}.{known_args.table_name}"
-    bad_table_ref = f"{project_id}:bronze.{known_args.table_name}_bad"
-    dlq_method = orch.get('dlq_method', 'bq') 
-    input_pattern = orch.get('source_file_pattern')
+    # DYNAMICALLY GENERATE SCHEMA
+    contract_fields = contract.get('schema', {}).get('columns', [])
+    full_bq_schema = generate_bq_schema(contract_fields, gov)
 
-    contract_fields = contract.get('columns', [])
-    if not contract_fields:
-        contract_fields = contract if isinstance(contract, list) else []
+    # Use the ISO string directly
+    job_ts = ctx['job_timestamp']
+
+    target_table_ref = f"{infra['service_project']}:{infra['dataset']}.{known_args.table_name}"
+    bad_table_ref = f"{infra['service_project']}:{infra['dataset']}.{known_args.table_name}_bad"
+    dlq_methods = [m.strip().lower() for m in orch.get('dlq_method', 'bq').split(',')]
+    input_path = f"gs://{infra['landing_bucket']}/{re.sub(r'<[^>]+>', '*', orch.get('filename_pattern', ''))}"
 
     pipeline_options = PipelineOptions(pipeline_args)
     google_opts = pipeline_options.view_as(GoogleCloudOptions)
-    google_opts.project = infra['shared_project'] 
-    google_opts.temp_location = f"gs://{infra['temp_bucket']}/temp"
-    google_opts.staging_location = f"gs://{infra['staging_bucket']}/staging"
-    google_opts.service_account_email = infra['dataflow_sa']
-    google_opts.subnetwork = infra['subnetwork']
-    google_opts.use_public_ips = infra['use_public_ips']
-    google_opts.region = infra['region']
+    google_opts.project, google_opts.region, google_opts.service_account_email = infra['shared_project'], infra['region'], infra['dataflow_sa']
+    google_opts.temp_location, google_opts.staging_location = f"gs://{infra['temp_bucket']}/temp", f"gs://{infra['staging_bucket']}/staging"
 
-    bad_table_schema = {
-        'fields': [
-            {'name': 'original_payload', 'type': 'STRING'},
-            {'name': 'error_message', 'type': 'STRING'},
-            {'name': 'file_name', 'type': 'STRING'},
-            {'name': 'timestamp', 'type': 'TIMESTAMP'}
-        ]
-    }
+    worker_opts = pipeline_options.view_as(WorkerOptions)
+    worker_opts.subnetwork, worker_opts.use_public_ips = infra['subnetwork'], infra['use_public_ips']
 
-    # 4. BUILD PIPELINE
     with beam.Pipeline(options=pipeline_options) as p:
-        readable_files = (
-            p 
-            | 'MatchFiles' >> MatchFiles(input_pattern)
-            | 'ReadMatches' >> ReadMatches()
-        )
+        readable_files = p | 'MatchFiles' >> MatchFiles(input_path) | 'ReadMatches' >> ReadMatches()
 
         results = (
             readable_files 
-            | 'ValidateAndMeta' >> beam.ParDo(ValidateAndParse(), contract_fields, known_args.unit)
-                                    .with_outputs(TAG_VALID, TAG_INVALID)
+            | 'ProcessFile' >> beam.ParDo(
+                ValidateAndParse(), contract_fields, known_args.unit, gov, ctx['batch_id'], job_ts
+            ).with_outputs(TAG_VALID, TAG_INVALID)
         )
 
-        (results[TAG_VALID] 
-         | 'WriteTarget' >> beam.io.WriteToBigQuery(
+        bq_write_results = (
+            results[TAG_VALID] 
+            | 'WriteTarget' >> beam.io.WriteToBigQuery(
                 target_table_ref,
-                # Note: valid_bq_schema is omitted to allow BQ to use existing table schema 
-                # which now includes your meta columns.
-                create_disposition=beam.io.BigQueryDisposition.CREATE_NEVER,
-                write_disposition=beam.io.BigQueryDisposition.WRITE_APPEND
+                schema=full_bq_schema,
+                create_disposition='CREATE_NEVER',
+                write_disposition='WRITE_APPEND',
+                method=beam.io.WriteToBigQuery.Method.STORAGE_WRITE_API
             )
         )
 
-        invalid_data = results[TAG_INVALID]
+        bq_failed_rows = bq_write_results['FailedRows'] | 'ParseBQErrors' >> beam.ParDo(ParseBigQueryErrors(), job_ts)
+        
+        all_invalid = (
+            (results[TAG_INVALID], bq_failed_rows) 
+            | 'FlattenErrors' >> beam.Flatten()
+        )
 
-        if dlq_method == 'bq':
-            (invalid_data
-             | 'WriteBadBQ' >> beam.io.WriteToBigQuery(
-                    bad_table_ref,
-                    schema=bad_table_schema,
-                    create_disposition=beam.io.BigQueryDisposition.CREATE_IF_NEEDED,
-                    write_disposition=beam.io.BigQueryDisposition.WRITE_APPEND
-                )
+        if 'bq' in dlq_methods:
+            all_invalid | 'BadToBQ' >> beam.io.WriteToBigQuery(
+                bad_table_ref,
+                # Fixed: timestamp is now STRING in the hint
+                schema='original_payload:STRING,error_message:STRING,file_name:STRING,timestamp:STRING,dq_status:STRING,failure_type:STRING',
+                create_disposition='CREATE_IF_NEEDED',
+                write_disposition='WRITE_APPEND',
+                method=beam.io.WriteToBigQuery.Method.STORAGE_WRITE_API
             )
-        elif dlq_method == 'GCS':
-            (invalid_data
-             | 'WriteBadGCS' >> beam.io.fileio.WriteToFiles(
-                    path='gs://dummy/unused',
-                    destination=lambda record: record['file_name'],
-                    sink=beam.io.fileio.TextSink(),
-                    file_naming=DynamicGCSNaming()
-                )
-             )
+        
+        if 'gcs' in dlq_methods:
+            (all_invalid | 'ToJSON' >> beam.Map(json.dumps)
+                         | 'BadToGCS' >> beam.io.fileio.WriteToFiles(
+                             path=f"gs://{infra['landing_bucket']}/errors/",
+                             destination=lambda r: json.loads(r)['file_name'],
+                             sink=beam.io.fileio.TextSink(),
+                             file_naming=DynamicGCSNaming()))
 
 if __name__ == '__main__':
-    logging.getLogger().setLevel(logging.INFO)
     run()
