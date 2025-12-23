@@ -2,6 +2,16 @@
 
 The primary goal of this bronge lawyer ingestion framework is to efficiency by making it metadata driven and putting guardrails that avoid rework. There are 2 guardrails in place before the dataflow comes into picture. 
 
+While the development of this project is kicked off with CSV due to its popularily, Parquet and Avro would be preferred choices for ongoing development. 
+
+| Ingestion Method | Format | Throughput (MBps) | Throughput (Elements/s) |
+| :--- | :--- | :--- | :--- |
+| **Parquet Load** | Parquet | ~90 - 110 MBps | ~88,000 - 105,000 |
+| **Avro Load** | Avro | ~78 MBps | ~77,000 |
+| **CSV Load** | CSV | ~65 - 70 MBps | ~64,000 - 68,000 |
+| **Storage Write API** | Stream | ~55 MBps | ~54,000 |
+| **JSON Load** | JSON | ~54 MBps | ~53,000 |
+
 ## Pre-Dataflow guardrails 
 
 ### 1. Table creation
@@ -17,7 +27,7 @@ Triggered when a file arrives in the GCS bucket. The first 3 files are generic a
 * [main.py](../../cloud_functions/csv_validator/main.py) - mainly just does the execution control
 * [steps.py](../../cloud_functions/csv_validator/steps.py) - generic steps and are to be used elsewhere
 * [csv_validator.py](../../cloud_functions/csv_validator/csv_validator.py)  is specific to CSV validation. 
-* (To be added: JSON, Parquet, and AVRO).
+* (To be added: Parquet, and AVRO).
 
 
 #### Validation steps:
