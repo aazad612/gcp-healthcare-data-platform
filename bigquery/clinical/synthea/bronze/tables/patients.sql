@@ -22,6 +22,7 @@ CREATE TABLE IF NOT EXISTS patients (
     zip STRING,
 
     -- 2. Identification Metadata
+    meta_pk_hash STRING,
     meta_row_uuid STRING,
     meta_batch_id STRING,
 
