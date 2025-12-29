@@ -20,6 +20,7 @@ BEGIN TRANSACTION;
     -- -------------------------
     -- METADATA EXISTENCE RULES
     -- -------------------------
+    ('BRONZE_V1', 'BRONZE', 'meta_pk_hash', 'STRING', TRUE, FALSE, FALSE);
     ('BRONZE_V1', 'BRONZE', 'meta_batch_id', 'STRING', TRUE, FALSE, FALSE),
     ('BRONZE_V1', 'BRONZE', 'meta_source_system', 'STRING', TRUE, FALSE, FALSE),
     ('BRONZE_V1', 'BRONZE', 'meta_source_filename', 'STRING', TRUE, FALSE, FALSE),
