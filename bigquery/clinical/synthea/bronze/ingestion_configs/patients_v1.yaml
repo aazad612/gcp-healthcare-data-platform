@@ -1,90 +1,61 @@
-version: "1.0"
-entity: "patients"
-description: "Demographic information for patients in the Synthea EMR."
-# ==============================================================================
-# 1. THE SCHEMA
-# Defines the structure, types, and primary keys for dbt/BigQuery.
-# ==============================================================================
+version: '1.0'
+entity: patients
+description: Demographic information for patients in the Synthea EMR.
 schema:
-  primary_key: ["Id"]
-  
+  primary_key:
+  - Id
   columns:
-    - name: "Id"
-      type: "STRING"
-      mode: "REQUIRED"
-      description: "UUID of the patient."
-
-    - name: "BIRTHDATE"
-      type: "DATE"
-      mode: "REQUIRED"
-      format: "%Y-%m-%d"
-      description: "Date of birth of the patient."
-
-    - name: "DEATHDATE"
-      type: "DATE"
-      mode: "NULLABLE"
-      format: "%Y-%m-%d"
-      description: "Date of death (if applicable)."
-
-    - name: "SSN"
-      type: "STRING"
-      mode: "NULLABLE"
-      description: "Social Security Number."
-
-    - name: "FIRST"
-      type: "STRING"
-      mode: "REQUIRED"
-      description: "First name of the patient."
-
-    - name: "LAST"
-      type: "STRING"
-      mode: "REQUIRED"
-      description: "Last name of the patient."
-
-    - name: "GENDER"
-      type: "STRING"
-      mode: "REQUIRED"
-      description: "Gender (M, F)."
-
-    - name: "RACE"
-      type: "STRING"
-      mode: "REQUIRED"
-      description: "Race of the patient."
-
-    - name: "ETHNICITY"
-      type: "STRING"
-      mode: "REQUIRED"
-      description: "Ethnicity of the patient."
-
-# ==============================================================================
-# 2. DATA QUALITY EXPECTATIONS
-# Drivers for Great Expectations and Python Pre-checks.
-# ==============================================================================
+  - name: Id
+    type: STRING
+    mode: REQUIRED
+    description: UUID of the patient.
+  - name: BIRTHDATE
+    type: DATE
+    mode: REQUIRED
+    format: '%Y-%m-%d'
+    description: Date of birth of the patient.
+  - name: DEATHDATE
+    type: DATE
+    mode: NULLABLE
+    format: '%Y-%m-%d'
+    description: Date of death (if applicable).
+  - name: SSN
+    type: STRING
+    mode: NULLABLE
+    description: Social Security Number.
+  - name: FIRST
+    type: STRING
+    mode: REQUIRED
+    description: First name of the patient.
+  - name: LAST
+    type: STRING
+    mode: REQUIRED
+    description: Last name of the patient.
+  - name: GENDER
+    type: STRING
+    mode: REQUIRED
+    description: Gender (M, F).
+  - name: RACE
+    type: STRING
+    mode: REQUIRED
+    description: Race of the patient.
+  - name: ETHNICITY
+    type: STRING
+    mode: REQUIRED
+    description: Ethnicity of the patient.
 quality:
-  # FAIL the row if these rules are violated
   row_level_checks:
-    - column: "Id"
-      rule: "uuid_format"
-      error_msg: "Patient Id must be a valid UUID."
-
-    - column: "BIRTHDATE"
-      rule: "not_null"
-      error_msg: "Patient Birth Date is mandatory."
-
-    - column: "GENDER"
-      rule: "regex_match"
-      pattern: "^[MF]$"
-      error_msg: "Gender must be either M or F."
-
-# ==============================================================================
-# 3. STORAGE STRATEGY
-#  Directives for BigQuery table creation.
-# ==============================================================================
-storage:
-  partition_by:
-    field: "BIRTHDATE"
-    type: "YEAR"
-  
-  cluster_by: ["LAST", "FIRST"]
-  
-  description: "Bronze layer table for raw Synthea patients data."
+  - column: Id
+    rule: uuid_format
+    error_msg: Patient Id must be a valid UUID.
+  - column: BIRTHDATE
+    rule: not_null
+    error_msg: Patient Birth Date is mandatory.
+  - column: GENDER
+    rule: regex_match
+    pattern: ^[MF]$
+    error_msg: Gender must be either M or F.
+schema_drift_policy:
+  allow_additive_columns: false
+  allow_type_widening: false
+  on_violation: REJECT

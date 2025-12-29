@@ -1,90 +1,60 @@
-version: "1.0"
-entity: "encounters"
-description: "Patient encounter and visit details from Synthea EMR."
-
-# ==============================================================================
-# 1. THE SCHEMA
-# Defines the structure, types, and primary keys for dbt/BigQuery.
-# ==============================================================================
+version: '1.0'
+entity: encounters
+description: Patient encounter and visit details from Synthea EMR.
 schema:
-  primary_key: ["Id"]
-  
+  primary_key:
+  - Id
   columns:
-    - name: "Id"
-      type: "STRING"
-      mode: "REQUIRED"
-      description: "UUID of the encounter."
-
-    - name: "START"
-      type: "DATETIME"
-      mode: "REQUIRED"
-      format: "%Y-%m-%dT%H:%M:%SZ"
-      description: "Start time of the encounter."
-
-    - name: "STOP"
-      type: "DATETIME"
-      mode: "REQUIRED"
-      format: "%Y-%m-%dT%H:%M:%SZ"
-      description: "End time of the encounter."
-
-    - name: "PATIENT"
-      type: "STRING"
-      mode: "REQUIRED"
-      description: "UUID of the patient (Foreign Key to Patients table)."
-
-    - name: "ORGANIZATION"
-      type: "STRING"
-      mode: "REQUIRED"
-      description: "UUID of the organization providing the service."
-
-    - name: "PROVIDER"
-      type: "STRING"
-      mode: "NULLABLE"
-      description: "UUID of the provider performing the service."
-
-    - name: "ENCOUNTERCLASS"
-      type: "STRING"
-      mode: "REQUIRED"
-      description: "The class of encounter (e.g., ambulatory, emergency, inpatient)."
-
-    - name: "CODE"
-      type: "STRING"
-      mode: "REQUIRED"
-      description: "Standard code for the encounter type."
-
-    - name: "DESCRIPTION"
-      type: "STRING"
-      mode: "NULLABLE"
-      description: "Description of the encounter."
-
-# ==============================================================================
-# 2. DATA QUALITY EXPECTATIONS
-# Drivers for Great Expectations and Python Pre-checks.
-# ==============================================================================
+  - name: Id
+    type: STRING
+    mode: REQUIRED
+    description: UUID of the encounter.
+  - name: START
+    type: DATETIME
+    mode: REQUIRED
+    format: '%Y-%m-%dT%H:%M:%SZ'
+    description: Start time of the encounter.
+  - name: STOP
+    type: DATETIME
+    mode: REQUIRED
+    format: '%Y-%m-%dT%H:%M:%SZ'
+    description: End time of the encounter.
+  - name: PATIENT
+    type: STRING
+    mode: REQUIRED
+    description: UUID of the patient (Foreign Key to Patients table).
+  - name: ORGANIZATION
+    type: STRING
+    mode: REQUIRED
+    description: UUID of the organization providing the service.
+  - name: PROVIDER
+    type: STRING
+    mode: NULLABLE
+    description: UUID of the provider performing the service.
+  - name: ENCOUNTERCLASS
+    type: STRING
+    mode: REQUIRED
+    description: The class of encounter.
+  - name: CODE
+    type: STRING
+    mode: REQUIRED
+    description: Standard code for the encounter type.
+  - name: DESCRIPTION
+    type: STRING
+    mode: NULLABLE
+    description: Description of the encounter.
 quality:
-  # FAIL the row if these rules are violated
   row_level_checks:
-    - column: "Id"
-      rule: "uuid_format"
-      error_msg: "Encounter Id must be a valid UUID."
-
-    - column: "START"
-      rule: "not_null"
-      error_msg: "Encounter Start time is mandatory."
-
-    - column: "PATIENT"
-      rule: "uuid_format"
-      error_msg: "Patient ID must be a valid UUID."
-
-# ==============================================================================
-# 3. STORAGE STRATEGY
-# Directives for BigQuery table creation.
-# ==============================================================================
-storage:
-  partition_by:
-    field: "START"
-    type: "MONTH"
-  
-  cluster_by: ["PATIENT", "ENCOUNTERCLASS"]
-  
-  description: "Bronze layer table for raw Synthea encounters data."
+  - column: Id
+    rule: uuid_format
+    error_msg: Encounter Id must be a valid UUID.
+  - column: START
+    rule: not_null
+    error_msg: Encounter Start time is mandatory.
+  - column: PATIENT
+    rule: uuid_format
+    error_msg: Patient ID must be a valid UUID.
+schema_drift_policy:
+  allow_additive_columns: false
+  allow_type_widening: false
+  on_violation: REJECT

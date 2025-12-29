@@ -1,75 +1,51 @@
-version: "1.0"
-entity: "conditions"
-description: "Patient diagnoses and conditions from Synthea EMR."
-
-# ==============================================================================
-# 1. THE SCHEMA
-# Defines the structure, types, and primary keys for dbt/BigQuery.
-# ==============================================================================
+version: '1.0'
+entity: conditions
+description: Patient diagnoses and conditions from Synthea EMR.
 schema:
-  primary_key: ["PATIENT", "CODE", "START"]
-  
+  primary_key:
+  - PATIENT
+  - CODE
+  - START
   columns:
-    - name: "START"
-      type: "DATE"
-      mode: "REQUIRED"
-      format: "%Y-%m-%d"
-      description: "Onset date of the condition."
-
-    - name: "STOP"
-      type: "DATE"
-      mode: "NULLABLE"
-      format: "%Y-%m-%d"
-      description: "Date when the condition resolved (if applicable)."
-
-    - name: "PATIENT"
-      type: "STRING"
-      mode: "REQUIRED"
-      description: "UUID of the patient (Foreign Key to Patients table)."
-
-    - name: "ENCOUNTER"
-      type: "STRING"
-      mode: "NULLABLE"
-      description: "UUID of the encounter where this condition was diagnosed."
-
-    - name: "CODE"
-      type: "STRING"
-      mode: "REQUIRED"
-      description: "SNOMED-CT code for the condition."
-
-    - name: "DESCRIPTION"
-      type: "STRING"
-      mode: "NULLABLE"
-      description: "Text description of the condition."
-
-# ==============================================================================
-# 2. DATA QUALITY EXPECTATIONS
-#  Drivers for Great Expectations and Python Pre-checks.
-# ==============================================================================
+  - name: START
+    type: DATE
+    mode: REQUIRED
+    format: '%Y-%m-%d'
+    description: Onset date of the condition.
+  - name: STOP
+    type: DATE
+    mode: NULLABLE
+    format: '%Y-%m-%d'
+    description: Date when the condition resolved (if applicable).
+  - name: PATIENT
+    type: STRING
+    mode: REQUIRED
+    description: UUID of the patient (Foreign Key to Patients table).
+  - name: ENCOUNTER
+    type: STRING
+    mode: NULLABLE
+    description: UUID of the encounter where this condition was diagnosed.
+  - name: CODE
+    type: STRING
+    mode: REQUIRED
+    description: SNOMED-CT code for the condition.
+  - name: DESCRIPTION
+    type: STRING
+    mode: NULLABLE
+    description: Text description of the condition.
 quality:
   row_level_checks:
-    - column: "CODE"
-      rule: "regex_match"
-      pattern: "^[0-9]+$"
-      error_msg: "Condition Code must be numeric SNOMED-CT format."
-
-    - column: "START"
-      rule: "not_null"
-      error_msg: "Condition Start Date is mandatory."
-
-    - column: "PATIENT"
-      rule: "uuid_format" # Custom rule logic you can implement
-      error_msg: "Patient ID must be a valid UUID."
-
-# ==============================================================================
-# 3. STORAGE STRATEGY
-# Directives for BigQuery table creation.
-# ==============================================================================
-storage:
-  partition_by:
-    field: "START"
-    type: "MONTH"
-  
-  cluster_by: ["PATIENT", "CODE"]
-  
-  description: "Bronze layer table for raw Synthea conditions data."
+  - column: CODE
+    rule: regex_match
+    pattern: ^[0-9]+$
+    error_msg: Condition Code must be numeric SNOMED-CT format.
+  - column: START
+    rule: not_null
+    error_msg: Condition Start Date is mandatory.
+  - column: PATIENT
+    rule: uuid_format
+    error_msg: Patient ID must be a valid UUID.
+schema_drift_policy:
+  allow_additive_columns: false
+  allow_type_widening: false
+  on_violation: REJECT
