@@ -1,148 +1,143 @@
-"""
-metadata_loader.py
+# dataflow/common/metadata_loader.py
 
-Loads runtime metadata for Dataflow using YAML contracts.
-"""
-
-from datetime import datetime, timezone
-from google.cloud import bigquery, storage
-from google.auth import impersonated_credentials
-import google.auth
 import yaml
+from google.cloud import bigquery
+from google.cloud import storage
+import datetime
 
 
-def get_bq_client(project_id: str, target_sa: str):
-    source_creds, _ = google.auth.default()
-    creds = impersonated_credentials.Credentials(
-        source_credentials=source_creds,
-        target_principal=target_sa,
-        target_scopes=["https://www.googleapis.com/auth/cloud-platform"],
-        lifetime=3600,
-    )
-    return bigquery.Client(project=project_id, credentials=creds)
+def parse_filename(file_name: str) -> dict:
+    """
+    Expected pattern:
+    incoming/<domain>/<yyyymmdd>/<system>/<entity>-<yyyymmdd>.<ext>
+    """
+
+    parts = file_name.split("/")
+    domain = parts[1]
+    arrival_date = parts[2]
+    system = parts[3]
+    entity = parts[4].split("-")[0]
+    file_date = parts[4].split("-")[1].split(".")[0]
+
+    return {
+        "domain": domain,
+        "system": system,
+        "entity": entity,
+        "arrival_date": arrival_date,
+        "file_date": file_date,
+        "file_name": file_name
+    }
 
 
-def load_ingestion_mapping(bq, ops_project, ops_dataset, env, domain, system, entity):
-    table = f"{ops_project}.{ops_dataset}.file_ingestion_mapping"
-
+def load_ingestion_mapping(bq_client, parsed):
     query = f"""
         SELECT *
-        FROM `{table}`
-        WHERE env=@env AND domain=@domain
-          AND system_name=@system AND entity=@entity
-          AND is_active=TRUE
+        FROM ops_metadata.file_ingestion_mapping
+        WHERE is_active = TRUE
+          AND domain = @domain
+          AND system_name = @system
+          AND entity = @entity
         LIMIT 1
     """
 
-    job = bq.query(
-        query,
-        job_config=bigquery.QueryJobConfig(
-            query_parameters=[
-                bigquery.ScalarQueryParameter("env", "STRING", env),
-                bigquery.ScalarQueryParameter("domain", "STRING", domain),
-                bigquery.ScalarQueryParameter("system", "STRING", system),
-                bigquery.ScalarQueryParameter("entity", "STRING", entity),
-            ]
-        ),
+    job_config = bigquery.QueryJobConfig(
+        query_parameters=[
+            bigquery.ScalarQueryParameter("domain", "STRING", parsed["domain"]),
+            bigquery.ScalarQueryParameter("system", "STRING", parsed["system"]),
+            bigquery.ScalarQueryParameter("entity", "STRING", parsed["entity"]),
+        ]
     )
 
-    rows = list(job.result())
+    rows = list(bq_client.query(query, job_config=job_config).result())
     if not rows:
-        raise RuntimeError("Active ingestion mapping not found")
+        raise RuntimeError("No active ingestion mapping found")
 
     return dict(rows[0])
 
 
-def load_yaml_contract(gcs_uri: str):
-    if not gcs_uri.startswith("gs://"):
-        raise ValueError("YAML contract must be gs://")
-
-    _, path = gcs_uri.replace("gs://", "").split("/", 1)
-    bucket_name, blob_path = path.split("/", 1)
-
-    blob = storage.Client().bucket(bucket_name).blob(blob_path)
+def load_yaml_contract(gcs_client, bucket, path):
+    blob = gcs_client.bucket(bucket).blob(path)
     return yaml.safe_load(blob.download_as_text())
 
 
-def load_standards(bq, ops_project, ops_dataset, standard_id, layer):
-    table = f"{ops_project}.{ops_dataset}.standards_definition"
-
+def load_standards(bq_client, standard_id, layer):
     query = f"""
-        SELECT column_name, expected_type, is_mandatory,
-               is_partition_col, is_cluster_col
-        FROM `{table}`
-        WHERE standard_id=@standard_id AND layer=@layer
+        SELECT column_name, expected_type
+        FROM ops_metadata.standards_definition
+        WHERE standard_id = @sid
+          AND layer = @layer
     """
 
-    job = bq.query(
-        query,
-        job_config=bigquery.QueryJobConfig(
-            query_parameters=[
-                bigquery.ScalarQueryParameter("standard_id", "STRING", standard_id),
-                bigquery.ScalarQueryParameter("layer", "STRING", layer),
-            ]
-        ),
+    job_config = bigquery.QueryJobConfig(
+        query_parameters=[
+            bigquery.ScalarQueryParameter("sid", "STRING", standard_id),
+            bigquery.ScalarQueryParameter("layer", "STRING", layer),
+        ]
     )
 
-    return [
-        {
-            "column": r.column_name,
-            "type": r.expected_type,
-            "mandatory": r.is_mandatory,
-            "partition": r.is_partition_col,
-            "cluster": r.is_cluster_col,
-        }
-        for r in job.result()
-    ]
+    rows = bq_client.query(query, job_config=job_config).result()
+    return {r.column_name: r.expected_type for r in rows}
 
 
-def compute_next_batch_id(bq, project, dataset, table):
-    q = f"SELECT COALESCE(MAX(meta_batch_id),'0') AS m FROM `{project}.{dataset}.{table}`"
-    rows = list(bq.query(q).result())
-    return str(int(rows[0]["m"]) + 1)
+def load_runtime_metadata(file_name: str):
+    parsed = parse_filename(file_name)
 
+    bq = bigquery.Client()
+    gcs = storage.Client()
 
-def load_runtime_metadata(
-    *,
-    env,
-    domain,
-    system,
-    entity,
-    runner_project,
-    runner_sa,
-    ops_project,
-    ops_dataset,
-):
-    bq = get_bq_client(runner_project, runner_sa)
+    mapping = load_ingestion_mapping(bq, parsed)
 
-    mapping = load_ingestion_mapping(
-        bq, ops_project, ops_dataset, env, domain, system, entity
+    yaml_contract = load_yaml_contract(
+        gcs,
+        mapping["gcs_config_bucket"],
+        mapping["gcs_yaml_ingestion_config"],
     )
 
-    yaml_contract = load_yaml_contract(mapping["gcs_yaml_ingestion_config"])
+    dlq_method = mapping["dlq_method"].lower()
+    use_storage_api = "pubsub" in dlq_method
 
-    standards = load_standards(
-        bq, ops_project, ops_dataset, "BRONZE_V1", "BRONZE"
-    )
+    # ---- job-level metadata (computed ONCE per run) ----
+    job_ts = datetime.now(timezone.utc)
 
-    batch_id = compute_next_batch_id(
-        bq,
-        mapping["target_project_id"],
-        mapping["target_dataset_id"],
-        mapping["target_table_name"],
-    )
+    batch_query = f"""
+        SELECT COALESCE(MAX(meta_batch_id), '0') AS max_batch_id
+        FROM `{mapping["target_project_id"]}.{mapping["target_dataset_id"]}.{mapping["target_table_name"]}`
+    """
+    rows = list(bq.query(batch_query).result())
+    next_batch_id = str(int(rows[0]["max_batch_id"]) + 1)
 
     return {
-        "env": env,
-        "domain": domain,
-        "system": system,
-        "entity": entity,
+        # identity (from filename)
+        **parsed,
+
+        # routing
+        "env": mapping["env"],
         "target_project": mapping["target_project_id"],
         "target_dataset": mapping["target_dataset_id"],
         "target_table": mapping["target_table_name"],
-        "contract": yaml_contract,          # YAML now
-        "standards": standards,
-        "meta_batch_id": batch_id,
-        "job_timestamp": datetime.now(timezone.utc),
-        "dlq_method": mapping["dlq_method"],
+
+        # contracts
+        "yaml_contract": yaml_contract,
+        "pk_columns": yaml_contract["schema"].get("primary_key"),
+        "schema_version": yaml_contract.get("version"),
+
+        # DLQ / execution
+        "dlq_method": dlq_method,
+        "dlq_topic": mapping.get("dlq_topic"),
+        "use_storage_write_api": use_storage_api,
+
+        # storage
+        "bucket_name": mapping["bucket_name"],
+        "archive_path": mapping["archive_path"],
+
+        # ---- job-level meta columns ----
+        "meta_batch_id": next_batch_id,
+        "meta_ingest_timestamp": job_ts,
+        "meta_source_system": parsed["system"],
+        "meta_source_filename": parsed["file_name"],
+        "meta_source_filedate": parsed["file_date"],
+        "meta_created_by": "dataflow",
+        "meta_created_date": job_ts,
+        "meta_updated_by": "dataflow",
+        "meta_updated_date": job_ts,
     }

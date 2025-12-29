@@ -36,7 +36,8 @@ INSERT INTO `{{PROJECT_ID}}.{{DATASET_ID}}.file_ingestion_mapping` (
 
     -- 6. Dataflow Path
     gcs_dataflow_template,
-    dlq_method, 
+    dlq_method,
+    dlq_topic,
 
     -- 7. Airflow Path
     validation_dag, 
@@ -80,6 +81,7 @@ VALUES (
     'prj-clin-syn-np', 
     'synthea_bronze_dev', 
     'conditions',
+    '',
 
     -- 6. Dataflow 
     'clinical/synthea/bronze/dataflow/conditions_v1.json',
