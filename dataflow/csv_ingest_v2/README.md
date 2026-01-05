@@ -306,3 +306,38 @@ python main.py \
 ```
 
 
+
+
+
+## Planned additions / new learnings
+
+
+---
+
+### Pytest
+* Unit testing Beam `DoFn`s in isolation
+* Validation logic correctness (positive and negative cases)
+* Metadata-driven test fixtures
+* Deterministic testing of edge cases (nulls, bad encodings, drift)
+
+---
+### 🔎 Great Expectations
+* Declarative validation rules for common data-quality checks
+* Reuse of expectations across ingestion and analytics layers
+* Classification of failures into DLQ categories
+* Runtime GX validation vs pre-ingestion enforcement
+* Performance tradeoffs inside Beam
+* Overlap vs redundancy with existing contract validation
+
+---
+### 🧱 Dataform or dbt
+* Contract alignment between Bronze and Silver layers
+* Schema documentation generation
+* Column-level lineage and freshness indicators
+* Ability to reuse ingestion contracts
+* Operational complexity
+* Fit with metadata-driven standards
+* Team adoption and maintainability
+
+---
+The system must be designed to evolve without rewrites, schema chaos, or silent data loss.
