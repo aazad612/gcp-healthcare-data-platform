@@ -2,16 +2,6 @@
 
 The primary goal of this bronge lawyer ingestion framework is to efficiency by making it metadata driven and putting guardrails that avoid rework. There are 2 guardrails in place before the dataflow comes into picture. 
 
-While the development of this project is kicked off with CSV due to its popularily, Parquet and Avro would be added for other use cases. 
-
-| Ingestion Method | Format | Throughput (MBps) | Throughput (Elements/s) |
-| :--- | :--- | :--- | :--- |
-| **Parquet Load** | Parquet | ~90 - 110 MBps | ~88,000 - 105,000 |
-| **Avro Load** | Avro | ~78 MBps | ~77,000 |
-| **CSV Load** | CSV | ~65 - 70 MBps | ~64,000 - 68,000 |
-| **Storage Write API** | Stream | ~55 MBps | ~54,000 |
-| **JSON Load** | JSON | ~54 MBps | ~53,000 |
-
 ## 🎯 Design Objectives
 
 * Enforce **Bronze-layer governance**, not raw dumping
@@ -20,20 +10,6 @@ While the development of this project is kicked off with CSV due to its populari
 * Support **multi-sink fan-out** from a single parse
 * Enable **safe retries, replay, and audit**
 * Prepare for **Flex Template–based deployment** (in progress)
-
-
----
-
-## 🎯 Design Objectives
-
-* Enforce **Bronze-layer governance**, not raw dumping
-* Fail early using **pre-ingestion guardrails**
-* Keep **business rules out of pipeline code**
-* Support **multi-sink fan-out** from a single parse
-* Enable **safe retries, replay, and audit**
-* Prepare for **Flex Template–based deployment** (in progress)
-
----
 
 ## 🧱 Pre-Dataflow Guardrails (Control Plane)
 
@@ -41,7 +17,6 @@ Before Dataflow is ever invoked, **two mandatory guardrails** ensure that only v
 
 These guardrails are **not optional** and are treated as part of the ingestion contract.
 
----
 
 ### 1. Table Creation & Standards Enforcement
 
@@ -59,7 +34,7 @@ All Bronze tables are created and validated **ahead of ingestion** via CI/CD.
 
 No Dataflow job is allowed to create or mutate tables.
 
----
+
 
 ### 2. Cloud Function Validation (Ingress Control)
 
@@ -86,7 +61,7 @@ Its responsibility is to **validate files before Dataflow** is allowed to run.
 
 Only validated files are eligible for Dataflow ingestion.
 
----
+
 
 ## 🏗️ Dataflow Architecture Overview
 
@@ -108,7 +83,7 @@ Fan-out Sinks
 
 The pipeline is **single-parse, multi-sink** by design.
 
----
+
 ## 🧠 Execution Model
 
 The execution model is **explicit, modular, and intentionally decomposed**.  
@@ -116,7 +91,7 @@ There is no “magic” file — each module owns a **single responsibility** in
 
 The pipeline is currently invoked **per input file**, with all behavior resolved dynamically via metadata.
 
----
+
 
 ## 🧠 Execution Flow (File-by-File)
 
@@ -142,7 +117,7 @@ dlq.py
 
 Each step is isolated, testable, and replaceable.
 
----
+
 
 ## 📄 Execution Components (Full Breakdown)
 
@@ -162,7 +137,7 @@ Responsibilities:
 
 This file exists to **start execution, not define behavior**.
 
----
+
 
 ### [`pipeline.py`](./pipeline.py) — Beam Graph Assembly
 
@@ -174,7 +149,7 @@ Responsibilities:
 
 This file defines **how data flows**, not **what rules apply**.
 
----
+
 
 ## 📥 Input Layer
 
@@ -192,7 +167,7 @@ Responsibilities:
 
 Pure ingestion only.
 
----
+
 
 ## 🧩 Governance & Enforcement Layer
 
@@ -211,7 +186,7 @@ Outputs:
 
 Validation **never stops the job** — it routes records.
 
----
+
 
 ### [`common/metadata_loader.py`](./common/metadata_loader.py) — Control Plane Adapter
 
@@ -223,7 +198,7 @@ Responsibilities:
 
 This module bridges **BigQuery control tables** and **runtime execution**.
 
----
+
 
 ### [`common/dedup.py`](./common/dedup.py) — Deduplication Guardrail
 
@@ -238,7 +213,7 @@ Current scope:
 Future scope:
 * Cross-file windowed deduplication
 
----
+
 
 ## 📤 Sink Layer (Fan-out)
 
@@ -251,7 +226,7 @@ Responsibilities:
 
 Failures are **not dropped** — they are forwarded to DLQ.
 
----
+
 
 ### [`io/write_gcs.py`](./io/write_gcs.py) — GCS Sink
 
@@ -262,7 +237,7 @@ Responsibilities:
 
 All records are JSON-encoded with failure context.
 
----
+
 
 ### [`io/write_pubsub.py`](./io/write_pubsub.py) — Pub/Sub Sink
 
@@ -273,7 +248,7 @@ Responsibilities:
 
 Fully optional and decoupled.
 
----
+
 
 ## 🧯 Failure Normalization
 
@@ -289,7 +264,7 @@ Responsibilities:
 
 This guarantees **observability and replayability**.
 
----
+
 
 ## 📋 Execution Guide
 
@@ -312,7 +287,7 @@ python main.py \
 ## Planned additions / new learnings
 
 
----
+
 
 ### Pytest
 * Unit testing Beam `DoFn`s in isolation
@@ -320,7 +295,7 @@ python main.py \
 * Metadata-driven test fixtures
 * Deterministic testing of edge cases (nulls, bad encodings, drift)
 
----
+
 ### 🔎 Great Expectations
 * Declarative validation rules for common data-quality checks
 * Reuse of expectations across ingestion and analytics layers
@@ -329,7 +304,7 @@ python main.py \
 * Performance tradeoffs inside Beam
 * Overlap vs redundancy with existing contract validation
 
----
+
 ### 🧱 Dataform or dbt
 * Contract alignment between Bronze and Silver layers
 * Schema documentation generation
@@ -339,5 +314,16 @@ python main.py \
 * Fit with metadata-driven standards
 * Team adoption and maintainability
 
----
+
 The system must be designed to evolve without rewrites, schema chaos, or silent data loss.
+
+
+While the development of this project is kicked off with CSV due to its popularily, Parquet and Avro would be added for other use cases. 
+
+| Ingestion Method | Format | Throughput (MBps) | Throughput (Elements/s) |
+| : | : | : | : |
+| **Parquet Load** | Parquet | ~90 - 110 MBps | ~88,000 - 105,000 |
+| **Avro Load** | Avro | ~78 MBps | ~77,000 |
+| **CSV Load** | CSV | ~65 - 70 MBps | ~64,000 - 68,000 |
+| **Storage Write API** | Stream | ~55 MBps | ~54,000 |
+| **JSON Load** | JSON | ~54 MBps | ~53,000 |
