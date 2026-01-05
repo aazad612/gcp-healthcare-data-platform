@@ -125,18 +125,3 @@ python main.py \
   --runner DataflowRunner
 ```
 
-## Wip Enhancements 
-### DEDUP 
-1. Added pk_hash for dedup in pipeline per batch. 
-2. --?? preprocessing hash? 
-### Validation 
-1. date validation 
-2. boolean validation
-3. invalid characters
-4. Schema drift
-### DLQ 
-1. DLQ Fanout standardization 
-### Multifile procesing
-1. current code is doing 1 file at a time
-2. Multiple files - window by date dedup - loading 
-### 

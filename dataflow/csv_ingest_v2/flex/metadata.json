@@ -1,0 +1,17 @@
+{
+  "name": "metadata-driven-ingestion",
+  "description": "Metadata-driven ingestion pipeline. The only external input is input_file; runtime_metadata resolves everything else (mapping, schema, sinks, DLQ routing).",
+  "parameters": [
+    {
+      "name": "input_file",
+      "label": "Input file",
+      "helpText": "File name/path used by runtime_metadata loader to resolve ingestion mapping, schema contract, sinks, and Dataflow options. Example: incoming/clinical/20251229/synthea/patients.csv (or a gs:// URI if your loader expects it).",
+      "isOptional": false,
+      "regexes": [
+        "^gs://.+/.+\\.csv$",
+        "^incoming/.+\\.csv$"
+      ],
+      "paramType": "TEXT"
+    }
+  ]
+}

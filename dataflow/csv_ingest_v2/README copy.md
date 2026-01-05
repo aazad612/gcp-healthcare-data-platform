@@ -12,6 +12,16 @@ While the development of this project is kicked off with CSV due to its populari
 | **Storage Write API** | Stream | ~55 MBps | ~54,000 |
 | **JSON Load** | JSON | ~54 MBps | ~53,000 |
 
+## 🎯 Design Objectives
+
+* Enforce **Bronze-layer governance**, not raw dumping
+* Fail early using **pre-ingestion guardrails**
+* Keep **business rules out of pipeline code**
+* Support **multi-sink fan-out** from a single parse
+* Enable **safe retries, replay, and audit**
+* Prepare for **Flex Template–based deployment** (in progress)
+
+
 ## Pre-Dataflow guardrails 
 
 ### 1. Table creation
@@ -117,13 +127,19 @@ Lineage and auditability are managed through stateful tracking, ensuring that ev
 
 ## 📋 Execution Guide
 ```bash
+# IF using my dot_profiles repo 
+# gset <profile_name>
+
+# Otherwise
+gcloud config set project prj-lbd-shared-np
+gcloud auth application-default login
+
+
 python main.py \
-  --domain clinical \
-  --unit synthea \
-  --table_name conditions \
-  --env dev \
-  --runner DataflowRunner
+  --input_file "gs://bkt-.../incoming/clinical/20251229/synthea/patient-20251229.csv"
 ```
+
+
 
 ## Wip Enhancements 
 ### DEDUP 
@@ -139,4 +155,9 @@ python main.py \
 ### Multifile procesing
 1. current code is doing 1 file at a time
 2. Multiple files - window by date dedup - loading 
-### 
+
+
+## NEW LEARNINGS to be added. 
+### Pytest 
+### Great Expectations
+### Dataform or DBT? 
