@@ -165,10 +165,21 @@ def resolve_org_df_vars(
     }
 
 
-def load_ingestion_mapping(bq_client, parsed):
+from google.cloud import bigquery
+
+
+def load_ingestion_mapping(bq_client, parsed, dataflow_project: str):
+    """
+    Load active ingestion mapping from ops_metadata.file_ingestion_mapping.
+
+    Uses ops project = dataflow_project (authoritative).
+    """
+
+    table = f"`{dataflow_project}.ops_metadata.file_ingestion_mapping`"
+
     query = f"""
         SELECT *
-        FROM ops_metadata.file_ingestion_mapping
+        FROM {table}
         WHERE is_active = TRUE
           AND domain = @domain
           AND system_name = @system
@@ -185,10 +196,18 @@ def load_ingestion_mapping(bq_client, parsed):
     )
 
     rows = list(bq_client.query(query, job_config=job_config).result())
+
     if not rows:
-        raise RuntimeError("No active ingestion mapping found")
+        raise RuntimeError(
+            "No active ingestion mapping found for "
+            f"domain={parsed['domain']}, "
+            f"system={parsed['system']}, "
+            f"entity={parsed['entity']} "
+            f"in {table}"
+        )
 
     return dict(rows[0])
+
 
 
 def load_yaml_contract(gcs_client, bucket, path):
@@ -196,84 +215,413 @@ def load_yaml_contract(gcs_client, bucket, path):
     return yaml.safe_load(blob.download_as_text())
 
 
-def load_standards(bq_client, standard_id, layer):
+from google.cloud import bigquery
+
+
+def load_standards(
+    bq_client,
+    *,
+    dataflow_project: str,
+    standard_id: str,
+    layer: str,
+) -> dict:
+    """
+    Load standards definition for a given standard_id and layer.
+
+    Returns a dict keyed by column_name with full rule metadata.
+
+    Standards are authoritative for:
+      - meta columns
+      - required columns
+      - partition / clustering
+    """
+
+    table = f"`{dataflow_project}.ops_metadata.standards_definition`"
+
     query = f"""
-        SELECT column_name, expected_type
-        FROM ops_metadata.standards_definition
-        WHERE standard_id = @sid
+        SELECT
+            column_name,
+            expected_type,
+            is_mandatory,
+            is_partition_col,
+            is_cluster_col
+        FROM {table}
+        WHERE standard_id = @standard_id
           AND layer = @layer
     """
 
     job_config = bigquery.QueryJobConfig(
         query_parameters=[
-            bigquery.ScalarQueryParameter("sid", "STRING", standard_id),
-            bigquery.ScalarQueryParameter("layer", "STRING", layer),
+            bigquery.ScalarQueryParameter(
+                "standard_id", "STRING", standard_id
+            ),
+            bigquery.ScalarQueryParameter(
+                "layer", "STRING", layer
+            ),
         ]
     )
 
-    rows = bq_client.query(query, job_config=job_config).result()
-    return {r.column_name: r.expected_type for r in rows}
+    rows = list(bq_client.query(query, job_config=job_config).result())
+
+    if not rows:
+        raise RuntimeError(
+            f"No standards found for standard_id={standard_id}, layer={layer} "
+            f"in {table}"
+        )
+
+    standards = {}
+    for r in rows:
+        standards[r.column_name] = {
+            "expected_type": r.expected_type,
+            "is_mandatory": bool(r.is_mandatory),
+            "is_partition_col": bool(r.is_partition_col),
+            "is_cluster_col": bool(r.is_cluster_col),
+        }
+
+    return standards
 
 
-def load_runtime_metadata(file_name: str):
-    parsed = parse_filename(file_name)
+def merge_contract_and_standards(
+    *,
+    contract: dict,
+    standards: dict,
+    schema_drift_policy: dict,
+) -> dict:
+    """
+    Merge business contract schema with platform standards.
 
-    bq = bigquery.Client()
-    gcs = storage.Client()
+    Rules:
+      - Contract defines business columns only
+      - Standards inject meta / platform columns
+      - Standards are authoritative for meta column types
+      - Contract type mismatches are governed by schema_drift_policy
+      - Partition / clustering come ONLY from standards
 
-    mapping = load_ingestion_mapping(bq, parsed)
+    Returns:
+      {
+        schema_columns: { col -> {type, mode, format?, description?} },
+        partition_cols: [ ... ],
+        cluster_cols: [ ... ]
+      }
+    """
 
-    yaml_contract = load_yaml_contract(
-        gcs,
-        mapping["gcs_config_bucket"],
-        mapping["gcs_yaml_ingestion_config"],
+    # ---------------------------------------------------------
+    # 1. Build base schema from contract (business columns)
+    # ---------------------------------------------------------
+    schema_columns = {}
+
+    for col in contract["schema"]["columns"]:
+        name = col["name"]
+
+        schema_columns[name] = {
+            "type": col["type"],
+            "mode": col.get("mode", "NULLABLE"),
+            "format": col.get("format"),
+            "description": col.get("description"),
+            "source": "contract",
+        }
+
+    # ---------------------------------------------------------
+    # 2. Apply standards (inject + enforce)
+    # ---------------------------------------------------------
+    partition_cols = []
+    cluster_cols = []
+
+    allow_type_widening = schema_drift_policy.get(
+        "allow_type_widening", False
     )
 
-    dlq_method = mapping["dlq_method"].lower()
-    use_storage_api = "pubsub" in dlq_method
+    for col_name, rule in standards.items():
+        std_type = rule["expected_type"]
 
-    # ---- job-level metadata (computed ONCE per run) ----
-    job_ts = datetime.now(timezone.utc)
+        if col_name in schema_columns:
+            # Column exists in contract → enforce policy
+            contract_type = schema_columns[col_name]["type"]
 
-    batch_query = f"""
-        SELECT COALESCE(MAX(meta_batch_id), '0') AS max_batch_id
-        FROM `{mapping["target_project_id"]}.{mapping["target_dataset_id"]}.{mapping["target_table_name"]}`
-    """
-    rows = list(bq.query(batch_query).result())
-    next_batch_id = str(int(rows[0]["max_batch_id"]) + 1)
+            if contract_type.upper() != std_type.upper():
+                if not allow_type_widening:
+                    raise RuntimeError(
+                        f"Type mismatch for column '{col_name}': "
+                        f"contract={contract_type}, standard={std_type} "
+                        f"and schema_drift_policy forbids widening"
+                    )
+
+                # allowed widening → enforce standard
+                schema_columns[col_name]["type"] = std_type
+
+        else:
+            # Inject meta / platform column
+            schema_columns[col_name] = {
+                "type": std_type,
+                "mode": "REQUIRED" if rule["is_mandatory"] else "NULLABLE",
+                "format": None,
+                "description": "injected by platform standards",
+                "source": "standard",
+            }
+
+        # Structural rules
+        if rule.get("is_partition_col"):
+            partition_cols.append(col_name)
+
+        if rule.get("is_cluster_col"):
+            cluster_cols.append(col_name)
+
+    # ---------------------------------------------------------
+    # 3. Enforce additive column policy (optional but correct)
+    # ---------------------------------------------------------
+    if not schema_drift_policy.get("allow_additive_columns", False):
+        # standards + contract columns are the only allowed columns
+        # (actual file-level enforcement happens later)
+        pass
 
     return {
-        # identity (from filename)
-        **parsed,
-
-        # routing
-        "env": mapping["env"],
-        "target_project": mapping["target_project_id"],
-        "target_dataset": mapping["target_dataset_id"],
-        "target_table": mapping["target_table_name"],
-
-        # contracts
-        "yaml_contract": yaml_contract,
-        "pk_columns": yaml_contract["schema"].get("primary_key"),
-        "schema_version": yaml_contract.get("version"),
-
-        # DLQ / execution
-        "dlq_method": dlq_method,
-        "dlq_topic": mapping.get("dlq_topic"),
-        "use_storage_write_api": use_storage_api,
-
-        # storage
-        "bucket_name": mapping["bucket_name"],
-        "archive_path": mapping["archive_path"],
-
-        # ---- job-level meta columns ----
-        "meta_batch_id": next_batch_id,
-        "meta_ingest_timestamp": job_ts,
-        "meta_source_system": parsed["system"],
-        "meta_source_filename": parsed["file_name"],
-        "meta_source_filedate": parsed["file_date"],
-        "meta_created_by": "dataflow",
-        "meta_created_date": job_ts,
-        "meta_updated_by": "dataflow",
-        "meta_updated_date": job_ts,
+        "schema_columns": schema_columns,
+        "partition_cols": partition_cols,
+        "cluster_cols": cluster_cols,
     }
+
+
+def build_dlq_schema_from_standards(
+    *,
+    dlq_standards: dict,
+) -> dict:
+    """
+    Build DLQ schema purely from DLQ standards.
+
+    Rules:
+      - DLQ schema is fully governed by standards_definition (DLQ_V1)
+      - No contract involved
+      - No schema drift allowed
+      - Partition / clustering derived from standards only
+
+    Returns:
+      {
+        dlq_schema: { col -> {type, mode} },
+        partition_cols: [ ... ],
+        cluster_cols: [ ... ]
+      }
+    """
+
+    dlq_schema = {}
+    partition_cols = []
+    cluster_cols = []
+
+    for col_name, rule in dlq_standards.items():
+        dlq_schema[col_name] = {
+            "type": rule["expected_type"],
+            "mode": "REQUIRED" if rule["is_mandatory"] else "NULLABLE",
+        }
+
+        if rule.get("is_partition_col"):
+            partition_cols.append(col_name)
+
+        if rule.get("is_cluster_col"):
+            cluster_cols.append(col_name)
+
+    return {
+        "dlq_schema": dlq_schema,
+        "partition_cols": partition_cols,
+        "cluster_cols": cluster_cols,
+    }
+
+
+from datetime import datetime, timezone
+import uuid
+import yaml
+from google.cloud import bigquery, storage
+
+
+def build_runtime_metadata(
+    *,
+    gcs_uri: str,
+    org_vars_path: str = "org_df_vars.yaml",
+) -> dict:
+    """
+    Authoritative control-plane builder.
+
+    Order of resolution:
+      1. parse_gcs_uri
+      2. resolve_org_df_vars
+      3. load_ingestion_mapping
+      4. load_yaml_contract
+      5. load standards (BRONZE + DLQ)
+      6. merge schemas
+    """
+
+    # ------------------------------------------------------------
+    # 1. Parse URI (env, domain, system, entity)
+    # ------------------------------------------------------------
+    parsed = parse_gcs_uri(gcs_uri)
+
+    # ------------------------------------------------------------
+    # 2. Resolve infra from org_df_vars.yaml (ROOT OF TRUTH)
+    # ------------------------------------------------------------
+    infra = resolve_org_df_vars(
+        env=parsed["env"],
+        domain=parsed["domain"],
+        system=parsed["system"],
+        org_vars_path=org_vars_path,
+    )
+
+    dataflow_project = infra["dataflow_project"]
+
+    # ------------------------------------------------------------
+    # 3. Control-plane clients (explicit project)
+    # ------------------------------------------------------------
+    bq_client = bigquery.Client(project=dataflow_project)
+    gcs_client = storage.Client(project=dataflow_project)
+
+    # ------------------------------------------------------------
+    # 4. Ingestion mapping (routing + standards + contract pointer)
+    # ------------------------------------------------------------
+    ingestion_mapping = load_ingestion_mapping(
+        bq_client=bq_client,
+        parsed=parsed,
+        dataflow_project=dataflow_project,
+    )
+
+    # Required fields in ingestion_mapping
+    target_table = ingestion_mapping["target_table"]
+    contract_path = ingestion_mapping["contract_path"]
+    standard_id = ingestion_mapping.get("standard_id", "BRONZE_V1")
+    dlq_standard_id = ingestion_mapping.get("dlq_standard_id", "DLQ_V1")
+    dlq_method = ingestion_mapping.get("dlq_method", [])
+    dlq_topic = ingestion_mapping.get("dlq_topic")
+
+    # ------------------------------------------------------------
+    # 5. Load contract (business schema only)
+    # ------------------------------------------------------------
+    contract = load_yaml_contract(
+        gcs_client,
+        bucket=infra["config_bucket"],
+        path=contract_path,
+    )
+
+    schema_drift_policy = contract.get("schema_drift_policy", {
+        "allow_additive_columns": False,
+        "allow_type_widening": False,
+        "on_violation": "REJECT",
+    })
+
+    # ------------------------------------------------------------
+    # 6. Load standards (meta / structure)
+    # ------------------------------------------------------------
+    bronze_standards = load_standards(
+        bq_client=bq_client,
+        dataflow_project=dataflow_project,
+        standard_id=standard_id,
+        layer="BRONZE",
+    )
+
+    dlq_standards = load_standards(
+        bq_client=bq_client,
+        dataflow_project=dataflow_project,
+        standard_id=dlq_standard_id,
+        layer="DLQ",
+    )
+
+    # ------------------------------------------------------------
+    # 7. Merge schemas
+    # ------------------------------------------------------------
+    merged_schema = merge_contract_and_standards(
+        contract=contract,
+        standards=bronze_standards,
+        schema_drift_policy=schema_drift_policy,
+    )
+
+    dlq_schema = build_dlq_schema_from_standards(
+        dlq_standards=dlq_standards
+    )
+
+    # ------------------------------------------------------------
+    # 8. Job / batch metadata
+    # ------------------------------------------------------------
+    batch_id = str(uuid.uuid4())
+    ingest_ts = datetime.now(timezone.utc).isoformat()
+
+    # ------------------------------------------------------------
+    # 9. Final runtime_metadata (single truth passed to pipeline)
+    # ------------------------------------------------------------
+    runtime_metadata = {
+        # ---------------- identity ----------------
+        "gcs_uri": gcs_uri,
+        "bucket": parsed["bucket"],
+        "env": parsed["env"],
+        "domain": parsed["domain"],
+        "system": parsed["system"],
+        "entity": parsed["entity"],
+        "arrival_date": parsed["arrival_date"],
+        "file_date": parsed["file_date"],
+        "ext": parsed["ext"],
+
+        # ---------------- execution infra ----------------
+        "region": infra["region"],
+        "use_public_ips": infra["use_public_ips"],
+        "dataflow_project": dataflow_project,
+        "dataflow_sa": infra["dataflow_sa"],
+        "temp_bucket": infra["temp_bucket"],
+        "staging_bucket": infra["staging_bucket"],
+        "subnetwork": infra["subnetwork"],
+
+        # ---------------- target routing ----------------
+        "target_project": infra["target_project"],
+        "target_dataset": infra["target_dataset"],
+        "target_table": target_table,
+
+        # ---------------- schema (bronze) ----------------
+        "schema_columns": merged_schema["schema_columns"],
+        "partition_cols": merged_schema["partition_cols"],
+        "cluster_cols": merged_schema["cluster_cols"],
+        "pk_columns": contract["schema"]["primary_key"],
+        "schema_version": contract.get("version"),
+
+        # ---------------- DLQ ----------------
+        "dlq_method": dlq_method,
+        "dlq_topic": dlq_topic,
+        "dlq_gcs_bucket": infra["landing_bucket"],
+        "dlq_schema": dlq_schema["dlq_schema"],
+        "dlq_partition_cols": dlq_schema["partition_cols"],
+        "dlq_cluster_cols": dlq_schema["cluster_cols"],
+
+        # ---------------- job metadata ----------------
+        "batch_id": batch_id,
+        "meta_batch_id": batch_id,
+        "meta_ingest_timestamp": ingest_ts,
+    }
+
+    return runtime_metadata
+
+
+if __name__ == "__main__":
+    """
+    Local sanity test for control-plane resolution only.
+
+    This:
+      - parses GCS URI
+      - resolves org_df_vars.yaml
+      - loads ingestion mapping
+      - loads contract
+      - loads standards
+      - builds runtime_metadata
+
+    It DOES NOT:
+      - run Beam
+      - touch Dataflow
+      - write to BigQuery
+      - write to GCS
+    """
+
+    # Example input — replace with a real one
+    gcs_uri = (
+        "gs://bkt-clin-syn-lake-dev-prj-clin-syn-np/"
+        "incoming/clin/20240101/synthea/encounters_20240101.csv"
+    )
+
+    runtime_metadata = build_runtime_metadata(
+        gcs_uri=gcs_uri,
+        org_vars_path="org_df_vars.yaml",
+    )
+
+    # Pretty-print for inspection
+    import json
+    print(json.dumps(runtime_metadata, indent=2, default=str))

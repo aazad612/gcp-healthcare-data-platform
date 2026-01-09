@@ -1,5 +1,28 @@
 
 # GARBAGE FROM CHATGPT 
+# Local testing 
+
+------------------------------------------------------------------------------------------------------------
+
+python main.py \
+  --input_file gs://bkt-.../incoming/.../file.csv \
+  --runner DirectRunner
+
+------------------------------------------------------------------------------------------------------------
+
+python main.py \
+  --input_file gs://bkt-.../incoming/.../file.csv \
+  --runner DataflowRunner \
+  --project <DATAFLOW_PROJECT> \
+  --region us-central1 \
+  --temp_location gs://<temp-bucket>/dataflow/tmp \
+  --staging_location gs://<staging-bucket>/dataflow/staging \
+  --subnetwork https://www.googleapis.com/compute/v1/projects/<host-project>/regions/us-central1/subnetworks/<subnet-name> \
+  --service_account_email <dataflow-sa>@<project>.iam.gserviceaccount.com \
+  --no_use_public_ips
+
+
+------------------------------------------------------------------------------------------------------------
 
 
 export REGION=us-central1
