@@ -1,31 +1,167 @@
-# dataflow/common/metadata_loader.py
-
 import yaml
 from google.cloud import bigquery
 from google.cloud import storage
-import datetime
+from datetime import datetime, timezone
+import re
+import uuid
 
+_GCS_URI_PATTERN = re.compile(
+    r"^gs://"
+    r"(?P<bucket>[a-z0-9\-]+)"
+    r"/incoming/"
+    r"(?P<domain>[a-z0-9_]+)/"
+    r"(?P<arrival_date>\d{8})/"
+    r"(?P<system>[a-z0-9_]+)/"
+    r"(?P<entity>[a-z0-9_]+)_"
+    r"(?P<file_date>\d{8})"
+    r"\.(?P<ext>[a-z0-9]+)$"
+)
 
-def parse_filename(file_name: str) -> dict:
+def parse_gcs_uri(gcs_uri: str) -> dict:
     """
+    Strict parser.
+
     Expected pattern:
-    incoming/<domain>/<yyyymmdd>/<system>/<entity>-<yyyymmdd>.<ext>
+      gs://<bucket>/incoming/<domain>/<yyyymmdd>/<system>/<entity>_<yyyymmdd>.<ext>
+
+    Bucket standard:
+      bkt-<domain>-<unit>-lake-<env>-...
+
+    Env is extracted from bucket position 5 (index 4).
     """
 
-    parts = file_name.split("/")
-    domain = parts[1]
-    arrival_date = parts[2]
-    system = parts[3]
-    entity = parts[4].split("-")[0]
-    file_date = parts[4].split("-")[1].split(".")[0]
+    m = _GCS_URI_PATTERN.match(gcs_uri)
+    if not m:
+        raise ValueError(
+            "Invalid GCS URI.\n"
+            "Expected:\n"
+            "  gs://<bucket>/incoming/<domain>/<yyyymmdd>/<system>/<entity>_<yyyymmdd>.<ext>\n"
+            f"Got:\n  {gcs_uri}"
+        )
 
+    parsed = m.groupdict()
+    bucket = parsed["bucket"]
+
+    # ---- extract env from bucket (fixed position) ----
+    bucket_parts = bucket.split("-")
+    if len(bucket_parts) < 5:
+        raise ValueError(
+            f"Invalid bucket name '{bucket}': expected env at position 5"
+        )
+
+    env = bucket_parts[4]
+    if env not in {"dev", "qa", "uat", "pd"}:
+        raise ValueError(
+            f"Invalid env '{env}' in bucket '{bucket}': "
+            "expected one of dev|qa|uat|pd at position 5"
+        )
+
+    # ---- final payload ----
     return {
+        "gcs_uri": gcs_uri,
+        "bucket": bucket,
+        "env": env,
+        "domain": parsed["domain"],
+        "system": parsed["system"],
+        "entity": parsed["entity"],
+        "arrival_date": parsed["arrival_date"],
+        "file_date": parsed["file_date"],
+        "ext": parsed["ext"],
+    }
+
+
+def resolve_org_df_vars(
+    *,
+    env: str,
+    domain: str,
+    system: str,
+    org_vars_path: str = "org_df_vars.yaml",
+) -> dict:
+    """
+    Resolve execution + unit infra from org_df_vars.yaml.
+
+    Inputs:
+      env     : dev | qa | uat | pd
+      domain  : logical domain (e.g. clinical, research)
+      system  : unit/system within domain (e.g. synthea, hospitals)
+
+    Returns:
+      dict with shared Dataflow execution infra + unit-level targets.
+    """
+
+    with open(org_vars_path, "r") as f:
+        cfg = yaml.safe_load(f)
+
+    if "domains" not in cfg:
+        raise ValueError("org_df_vars.yaml missing top-level 'domains' key")
+
+    if domain not in cfg["domains"]:
+        raise ValueError(f"Domain '{domain}' not found in org_df_vars.yaml")
+
+    domain_cfg = cfg["domains"][domain]
+
+    # ---- shared infra (Dataflow execution context) ----
+    shared = domain_cfg.get("shared_infra")
+    if not shared:
+        raise ValueError(f"Domain '{domain}' missing shared_infra block")
+
+    def _env_lookup(block: dict, name: str):
+        if name not in block:
+            raise ValueError(f"Missing '{name}' in shared_infra for domain '{domain}'")
+        if env not in block[name]:
+            raise ValueError(
+                f"Env '{env}' not defined for '{name}' in domain '{domain}'"
+            )
+        return block[name][env]
+
+    execution = {
+        "env": env,
         "domain": domain,
-        "system": system,
-        "entity": entity,
-        "arrival_date": arrival_date,
-        "file_date": file_date,
-        "file_name": file_name
+        "region": domain_cfg.get("region"),
+        "use_public_ips": domain_cfg.get("use_public_ips", False),
+
+        # Dataflow execution infra
+        "dataflow_project": _env_lookup(shared, "project"),
+        "dataflow_sa": _env_lookup(shared, "dataflow_sa"),
+        "temp_bucket": _env_lookup(shared, "temp_bucket"),
+        "staging_bucket": _env_lookup(shared, "staging_bucket"),
+        "subnetwork": _env_lookup(shared, "subnet"),
+    }
+
+    # ---- unit / system infra ----
+    units = domain_cfg.get("units")
+    if not units:
+        raise ValueError(f"Domain '{domain}' has no units defined")
+
+    if system not in units:
+        raise ValueError(
+            f"System '{system}' not found under domain '{domain}' units"
+        )
+
+    unit_cfg = units[system]
+
+    def _unit_env_lookup(block: dict, name: str):
+        if name not in block:
+            raise ValueError(
+                f"Missing '{name}' for system '{system}' in domain '{domain}'"
+            )
+        if env not in block[name]:
+            raise ValueError(
+                f"Env '{env}' not defined for '{name}' in system '{system}'"
+            )
+        return block[name][env]
+
+    unit = {
+        "target_project": _unit_env_lookup(unit_cfg, "project"),
+        "target_dataset": _unit_env_lookup(unit_cfg, "dataset"),
+        "config_bucket": _unit_env_lookup(unit_cfg, "config_bucket"),
+        "landing_bucket": _unit_env_lookup(unit_cfg, "landing_bucket"),
+    }
+
+    # ---- final resolved metadata ----
+    return {
+        **execution,
+        **unit,
     }
 
 
