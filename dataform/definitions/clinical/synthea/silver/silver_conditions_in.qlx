@@ -1,0 +1,36 @@
+config {
+  type: "table",
+  name: "silver_conditions_in",
+  schema: dataform.projectConfig.vars.silver_dataset,
+  description: "Cleaned condition records from Synthea",
+  assertions: {
+    nonNull: ["start", "stop", "patient_id"]
+  }
+}
+
+SELECT
+  start,
+  NULLIF(REGEXP_REPLACE(stop, r'\\s', ''), '') AS stop,
+  stop,
+  patient,
+  encounter,
+  system,
+  code,
+  description,
+  meta_row_uuid,
+  meta_batch_id,
+  meta_source_system,
+  meta_source_filename,
+  meta_source_filedate,
+  meta_ingest_timestamp,
+  meta_dq_flag,
+  meta_created_by,
+  meta_created_date,
+  meta_updated_by,
+  meta_updated_date
+FROM ${ref({
+  database: dataform.projectConfig.vars.bronze_project,
+  schema: dataform.projectConfig.vars.bronze_dataset,
+  name: "conditions"
+})}
+WHERE start = "2025-03-10"

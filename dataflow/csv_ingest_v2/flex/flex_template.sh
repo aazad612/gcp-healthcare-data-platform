@@ -33,8 +33,10 @@ export TAG=v1
 
 gcloud auth configure-docker ${REGION}-docker.pkg.dev
 
-docker build -t ${REGION}-docker.pkg.dev/${PROJECT}/${REPO}/${IMAGE_NAME}:${TAG} .
-docker push ${REGION}-docker.pkg.dev/${PROJECT}/${REPO}/${IMAGE_NAME}:${TAG}
+gcloud builds submit \
+  --tag gcr.io/<DATAFLOW_PROJECT>/df-ingestion:latest
+
+
 
 
 export TEMPLATE_PATH="gs://bkt-df-templates-np/templates/ingestion.json"

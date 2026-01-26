@@ -1,0 +1,36 @@
+config {
+  type: "table",
+  name: "gold_patient_summary",
+  schema: vars.gold_dataset,
+  description: "Patient-level clinical summary"
+}
+
+SELECT
+  p.patient_id,
+  p.gender,
+  p.race,
+  COUNT(DISTINCT e.encounter_id) AS total_encounters,
+  COUNT(DISTINCT c.condition_id) AS total_conditions,
+  MIN(e.start_time) AS first_encounter_date,
+  MAX(e.end_time) AS last_encounter_date
+FROM ${ref({
+  project: vars.silver_project,
+  dataset: vars.silver_dataset,
+  name: "silver_patients"
+})} AS p
+LEFT JOIN ${ref({
+  project: vars.silver_project,
+  dataset: vars.silver_dataset,
+  name: "silver_encounters"
+})} AS e
+  ON p.patient_id = e.patient_id
+LEFT JOIN ${ref({
+  project: vars.silver_project,
+  dataset: vars.silver_dataset,
+  name: "silver_conditions"
+})} AS c
+  ON p.patient_id = c.patient_id
+GROUP BY
+  p.patient_id,
+  p.gender,
+  p.race;

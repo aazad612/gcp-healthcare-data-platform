@@ -1,0 +1,13 @@
+config {
+  type: "view",
+  schema: "ds_synthea_views",
+  description: "Currently active patient conditions"
+}
+
+SELECT
+  patient_id,
+  condition_id,
+  description,
+  onset
+FROM ${ref("silver_conditions")}
+WHERE abatement IS NULL

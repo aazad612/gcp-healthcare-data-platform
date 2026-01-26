@@ -1,0 +1,26 @@
+config {
+  type: "table",
+  name: "silver_patients",
+  schema: vars.silver_dataset,
+  description: "Cleaned patient records from Synthea",
+  assertions: {
+    nonNull: ["patient_id", "birthdate", "gender"],
+    uniqueKey: ["patient_id"]
+  }
+}
+
+SELECT
+  id AS patient_id,
+  birthdate,
+  deathdate,
+  gender,
+  race,
+  ethnicity,
+  city,
+  state,
+  CURRENT_TIMESTAMP() AS audit_load_timestamp
+FROM ${ref({
+  project: vars.bronze_project,
+  dataset: vars.bronze_dataset,
+  name: "patients"
+})};
